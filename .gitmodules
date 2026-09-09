@@ -1,0 +1,3 @@
+[submodule "agentic_review_annotation_distilabel/thirdparty/openhands"]
+	path = agentic_review_annotation_distilabel/thirdparty/openhands
+	url = https://github.com/OpenHands/benchmarks.git

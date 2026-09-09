@@ -1,8 +1,8 @@
 # Agentic Work Review 自动标注框架
 
-这个项目用于对 SWE Agent 的工作轨迹做自动预标注，产出结构化 JSON，之后供人工检查、修正，并沉淀成 GT。
+这个项目用于对于不同的coding agent问题使用不同的agent框架生成 的工作轨迹做自动预标注，产出结构化 JSON，之后供人工检查、修正，并沉淀成 GT。
 
-当前可运行版本基于 Distilabel。第一版已经接入项目内现有的 DeNovoSWE 样例，默认样例路径是 `annotation/samples/*.json`。
+当前可运行版本基于 Distilabel。第一版已经接入项目内现有的 DeNovoSWE 样例，默认样例路径是 `annotation/samples/*.json`。在9.9日组会之后，由予童搭建使用不同的agent框架结合由这不同docker环境的完整项目生成一条Long-Horizon的、完整的working traj。在这一个版本中，我们初步需要支持mini-swe-agents和openhands这两种高影响力并且简洁的coding-agent框架。
 
 ## 当前支持范围
 
@@ -280,3 +280,7 @@ Canonical step 当前只包含：
 当前版本只正式支持 DeNovoSWE raw JSON。SWE-agent、OpenHands 等其他数据集还没有接入；后续需要先实现统一接口、多 parser 或通用 parser，再复用同一条 Distilabel annotation pipeline。
 
 大样本真实模型标注会产生费用。正式批量跑之前，建议先用 `--runner mock` 检查流程，再用 `--input` 单条样例试跑真实模型。
+
+## 9.9之后的计划
+1. 能在调用api和本地部署模型的两种情况下使用mini-swe-agents和openhands两个开源的coding agents框架对于给定的问题进行产出模型的traj。
+2. 将不同的agent框架产出的结果归一化为agent traj protocal的形式方便忆安后面的处理。
