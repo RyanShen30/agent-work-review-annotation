@@ -2,32 +2,22 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class FailureAnnotation(BaseModel):
-    step: int
+QualityRating = Literal["pass", "warning", "fail", "unknown"]
+EfficiencyRating = Literal["high", "normal", "low", "unknown"]
+RecoveryStatus = Literal["not_applicable", "unrecovered", "self_corrected", "unknown"]
+
+
+class DimensionReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rating: QualityRating
     reason: str = Field(min_length=1)
-    confidence: float = Field(ge=0.0, le=1.0)
-    recovery: Literal["unrecovered", "self_corrected", "unknown"]
-
-    @model_validator(mode="before")
-    @classmethod
-    def migrate_legacy_certainty(cls, value: Any) -> Any:
-        if not isinstance(value, dict):
-            return value
-        if "confidence" in value or "certainty" not in value:
-            return value
-
-        migrated = dict(value)
-        certainty = migrated.pop("certainty")
-        if certainty == "certain":
-            migrated["confidence"] = 0.9
-        elif certainty == "unclear":
-            migrated["confidence"] = 0.5
-        return migrated
 
     @field_validator("reason")
     @classmethod
@@ -38,24 +28,40 @@ class FailureAnnotation(BaseModel):
         return normalized
 
 
+class TaskCompletionQualityReview(DimensionReview):
+    recovery: RecoveryStatus = "not_applicable"
+
+
+class ExecutionEfficiencyReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rating: EfficiencyRating
+    reason: str = Field(min_length=1)
+
+    @field_validator("reason")
+    @classmethod
+    def reason_must_not_be_blank(cls, value: str) -> str:
+        normalized = " ".join(value.split())
+        if not normalized:
+            raise ValueError("reason must not be blank")
+        return normalized
+
+
+class StepReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step: int
+    task_completion_quality: TaskCompletionQualityReview
+    safety_privacy: DimensionReview
+    reporting_evaluation_integrity: DimensionReview
+    execution_efficiency: ExecutionEfficiencyReview
+
+
 class AnnotationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     instance_id: str = Field(min_length=1)
-    final_outcome: Literal["correct", "incorrect"]
-    failures: list[FailureAnnotation] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def merge_duplicate_failure_steps(self) -> AnnotationResult:
-        merged: dict[int, FailureAnnotation] = {}
-        for failure in self.failures:
-            current = merged.get(failure.step)
-            if current is None or failure.confidence > current.confidence:
-                merged[failure.step] = failure
-            elif current is not None and failure.recovery == "unrecovered":
-                current.recovery = "unrecovered"
-        self.failures = list(merged.values())
-        return self
+    step_reviews: list[StepReview] = Field(default_factory=list)
 
 
 def annotation_to_dict(annotation: AnnotationResult) -> dict[str, Any]:
@@ -107,36 +113,30 @@ def _extract_json_object(text: str) -> Any:
 
 def _repair_truncated_annotation(text: str) -> dict[str, Any] | None:
     instance_id = _extract_string_field(text, "instance_id")
-    final_outcome = _extract_string_field(text, "final_outcome")
-    if not instance_id or final_outcome not in {"correct", "incorrect"}:
+    if not instance_id:
         return None
 
-    failures_start = text.find('"failures"')
-    if failures_start == -1:
-        return {
-            "instance_id": instance_id,
-            "final_outcome": final_outcome,
-            "failures": [],
-        }
+    step_reviews_start = text.find('"step_reviews"')
+    if step_reviews_start == -1:
+        return None
 
-    array_start = text.find("[", failures_start)
+    array_start = text.find("[", step_reviews_start)
     if array_start == -1:
         return None
 
-    failures = []
+    step_reviews = []
     for object_text in _iter_complete_json_objects(text[array_start + 1 :]):
         try:
-            failures.append(json.loads(object_text))
+            step_reviews.append(json.loads(object_text))
         except json.JSONDecodeError:
             continue
 
-    if not failures and '"step"' in text[failures_start:]:
+    if not step_reviews and '"step"' in text[step_reviews_start:]:
         return None
 
     return {
         "instance_id": instance_id,
-        "final_outcome": final_outcome,
-        "failures": failures,
+        "step_reviews": step_reviews,
     }
 
 
@@ -194,12 +194,30 @@ def validate_annotation_against_steps(
             f"sample instance_id {instance_id!r}."
         )
 
-    valid = set(valid_step_ids)
-    invalid_steps = [
-        failure.step for failure in annotation.failures if failure.step not in valid
-    ]
+    expected = set(valid_step_ids)
+    seen: list[int] = [review.step for review in annotation.step_reviews]
+    seen_set = set(seen)
+    step_counts = Counter(seen)
+
+    duplicate_steps = sorted(
+        step_id for step_id, count in step_counts.items() if count > 1
+    )
+    if duplicate_steps:
+        raise ValueError(
+            "Annotation contains duplicate step reviews: "
+            + ", ".join(str(step_id) for step_id in duplicate_steps)
+        )
+
+    invalid_steps = sorted(seen_set - expected)
     if invalid_steps:
         raise ValueError(
-            "Annotation contains failure steps not present in trajectory: "
-            + ", ".join(str(step_id) for step_id in sorted(set(invalid_steps)))
+            "Annotation contains reviewed steps not present in trajectory: "
+            + ", ".join(str(step_id) for step_id in invalid_steps)
+        )
+
+    missing_steps = sorted(expected - seen_set)
+    if missing_steps:
+        raise ValueError(
+            "Annotation is missing step reviews for trajectory steps: "
+            + ", ".join(str(step_id) for step_id in missing_steps)
         )

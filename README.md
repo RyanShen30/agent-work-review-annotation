@@ -2,15 +2,15 @@
 
 这个项目用于对于不同的coding agent问题使用不同的agent框架生成 的工作轨迹做自动预标注，产出结构化 JSON，之后供人工检查、修正，并沉淀成 GT。
 
-当前版本基于 Distilabel，支持 DeNovoSWE 样例，并可使用 mini-swe-agent 和 OpenHands 在 SWE-bench Docker 环境中生成 trajectory。
+当前版本基于 Distilabel，默认处理 mini-swe-agent 生成的 trajectory，并可用 mini-swe-agent/OpenHands 在 SWE-bench Docker 环境中生成轨迹。OpenHands 的 runner 和 adapter 先保留在仓库里，这一轮主要维护 mini-swe-agent 到自动标注的链路。
 
 ## 当前支持范围
 
 当前支持三种输入：
 
-- DeNovoSWE `trajectory`；
-- mini-swe-agent `messages`；
-- OpenHands `events`。
+- mini-swe-agent `messages`，当前默认路径；
+- OpenHands `events`，暂保留；
+- DeNovoSWE `trajectory`，仅保留兼容 adapter 和单元测试，不再提交原始样例数据。
 
 各 adapter 将原始结果转换为统一 `Sample`，再进入同一条标注 pipeline。
 
@@ -41,7 +41,8 @@ agentic_review_annotation_distilabel/
 ├── steps/                    # trajectory -> canonical steps
 │   ├── base.py
 │   ├── agent.py
-│   └── denovo.py
+│   ├── denovo.py
+│   └── mini_swe_agent.py
 ├── annotation/               # 输出 schema、prompt builder
 │   ├── prompt_builder.py
 │   └── schema.py
@@ -62,7 +63,7 @@ agentic_review_annotation_distilabel/
 项目根目录还有：
 
 ```text
-annotation/samples/           # 当前 3 条 DeNovoSWE 原始样例
+annotation/samples/           # 小型 mini-swe-agent mock 样例
 tests/                        # 基础单元测试
 ```
 
@@ -152,11 +153,11 @@ DeepSeek 默认会通过 `extra_body` 关闭 thinking，减少空输出和无效
   --overwrite
 ```
 
-这个命令会验证：
+这个命令默认读取 `annotation/samples/mini_swe_agent_sample.json`，会验证：
 
 - 能读取原始 JSON；
-- 能适配 DeNovoSWE 字段；
-- 能切出 canonical steps；
+- 能适配 mini-swe-agent 字段；
+- 能用 MiniSWEAgent 专用 step parser 切出 canonical steps；
 - 能走 Distilabel pipeline；
 - 能生成并保存结构合法的 annotation JSON。
 
@@ -179,7 +180,7 @@ Mock 结果只用于检查流程，不代表真实标注质量。
 ```bash
 .venv/bin/python -m agentic_review_annotation_distilabel.run \
   --runner llm \
-  --input annotation/samples/sample_002.json \
+  --input annotation/samples/mini_swe_agent_sample.json \
   --overwrite \
   --no-cache
 ```
@@ -189,7 +190,7 @@ Mock 结果只用于检查流程，不代表真实标注质量。
 ```bash
 .venv/bin/python -m agentic_review_annotation_distilabel.run \
   --runner llm \
-  --input annotation/samples/sample_002.json \
+  --input annotation/samples/mini_swe_agent_sample.json \
   --model-max-new-tokens 8192 \
   --overwrite \
   --no-cache
@@ -230,50 +231,69 @@ agentic_review_annotation_distilabel/data/auto_annotations/_failed/
 ```json
 {
   "instance_id": "example_id",
-  "final_outcome": "correct",
-  "failures": [
+  "step_reviews": [
     {
       "step": 7,
-      "reason": "The step introduced a correctness-relevant bug that was not fixed later.",
-      "confidence": 0.9,
-      "recovery": "unrecovered"
+      "task_completion_quality": {
+        "rating": "warning",
+        "reason": "The step made a plausible change but did not verify the relevant behavior.",
+        "recovery": "self_corrected"
+      },
+      "safety_privacy": {
+        "rating": "pass",
+        "reason": "The step stayed within the provided repository context."
+      },
+      "reporting_evaluation_integrity": {
+        "rating": "pass",
+        "reason": "The step did not claim an unsupported result."
+      },
+      "execution_efficiency": {
+        "rating": "normal",
+        "reason": "The amount of exploration was reasonable for the task."
+      }
     }
   ],
   "metadata": {
     "model": "model-name",
     "prompt_version": "annotation_v1",
-    "source_path": "annotation/samples/sample_001.json"
+    "source_path": "annotation/samples/mini_swe_agent_sample.json"
   }
 }
 ```
 
 字段约束：
 
-- `final_outcome` 只能是 `correct` 或 `incorrect`；
-- `failures[].step` 必须是真实存在的 `step_id`；
-- `confidence` 是 0 到 1 的模型内部置信度；
-- `recovery` 只能是 `unrecovered`、`self_corrected` 或 `unknown`。
+- `step_reviews` 必须刚好覆盖每个真实存在的 `step_id`，不能漏也不能重复；
+- `task_completion_quality`、`safety_privacy`、`reporting_evaluation_integrity` 的 `rating` 使用 `pass`、`warning`、`fail`、`unknown`；
+- `execution_efficiency.rating` 使用 `high`、`normal`、`low`、`unknown`；
+- 只有 `task_completion_quality` 有 `recovery`，使用 `not_applicable`、`unrecovered`、`self_corrected`、`unknown`。
 
-## 当前 DeNovoSWE 字段适配方式
+## 当前 mini-swe-agent 字段适配方式
 
-当前 adapter 根据真实样例字段做映射：
+当前 adapter 根据 mini-swe-agent 保存的结果字段做映射：
 
-- `instance_id`：来自原始 `instance_id`；
-- `task`：来自原始 `initial_messages`，保留 system/user message；
-- `trajectory`：来自原始 `trajectory`，完整保留；
-- `patch`：来自原始 `patch`，完整 diff 字符串；
-- `evaluation`：来自 `success`、`score`、`finish_reason`、`error`、`difficulty`、`eval_result`。
+- `instance_id`：优先来自 `instance_id`、`info.instance_id` 等字段；
+- `task`：优先来自 `problem`、`task`、`problem_statement`，否则取第一条 user message；
+- `trajectory`：来自 `messages`，完整保留；
+- `patch`：来自 `info.submission`、`submission`、`generated_patch`、`model_patch` 或 `patch`；
+- `evaluation`：来自 `outcome.exit_status`、`info.exit_status`、`eval_result`、`eval_logs`、`model_stats` 等。
 
-Canonical step 当前只包含：
+MiniSWEAgent step parser 会把一条 assistant message 和其后的 tool/user observations 组成一个 `agent_turn`：
 
 ```json
 {
   "step_id": 0,
-  "content": {}
+  "content": {
+    "type": "agent_turn",
+    "agent_message": {},
+    "actions": [],
+    "observations": [],
+    "context_messages": []
+  }
 }
 ```
 
-其中 `content` 是原始 step 对象的完整拷贝，不会强行拆成 reasoning/action/observation 的统一格式。
+这样 mini-swe-agent 的“跑轨迹”输出可以直接进入后续自动标注。
 
 ## 常用参数
 

@@ -44,6 +44,8 @@ class PromptBuilder:
     def build_payload(self, sample: Sample, steps: list[CanonicalStep]) -> dict[str, Any]:
         return {
             "instance_id": sample.instance_id,
+            "repository": sample.repository,
+            "environment": sample.environment,
             "task": sample.task,
             "evaluation": sample.evaluation,
             "patch": sample.patch,
@@ -85,6 +87,8 @@ class PromptBuilder:
 
         return {
             "instance_id": sample.instance_id,
+            "repository": truncate_data(sample.repository, 4000),
+            "environment": truncate_data(sample.environment, 4000),
             "task": truncate_data(sample.task, self.max_task_chars),
             "evaluation": sample.evaluation,
             "patch": truncate_text(sample.patch or "", self.max_patch_chars),
@@ -101,6 +105,18 @@ def compact_step_content(content: Any) -> Any:
         return truncate_data(content, 6000)
 
     compact: dict[str, Any] = {}
+    if content.get("type") == "agent_turn":
+        compact["type"] = "agent_turn"
+        compact["agent_message"] = truncate_data(content.get("agent_message"), 2500)
+        compact["actions"] = truncate_data(content.get("actions"), 1800)
+        compact["observations"] = truncate_data(content.get("observations"), 2200)
+        if content.get("context_messages"):
+            compact["context_messages"] = truncate_data(
+                content.get("context_messages"),
+                2000,
+            )
+        return compact
+
     if "step" in content:
         compact["step"] = content["step"]
 

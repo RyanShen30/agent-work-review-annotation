@@ -4,8 +4,18 @@ from agentic_review_annotation_distilabel.annotation.prompt_builder import (
 )
 from agentic_review_annotation_distilabel.annotation.schema import (
     AnnotationResult,
-    FailureAnnotation,
+    DimensionReview,
+    ExecutionEfficiencyReview,
+    StepReview,
+    TaskCompletionQualityReview,
 )
 
-__all__ = ["AnnotationResult", "FailureAnnotation", "PROMPT_VERSION", "PromptBuilder"]
-
+__all__ = [
+    "AnnotationResult",
+    "DimensionReview",
+    "ExecutionEfficiencyReview",
+    "PROMPT_VERSION",
+    "PromptBuilder",
+    "StepReview",
+    "TaskCompletionQualityReview",
+]

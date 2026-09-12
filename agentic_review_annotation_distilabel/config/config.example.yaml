@@ -1,4 +1,4 @@
-dataset: denovo
+dataset: mini_swe_agent
 runner: llm
 use_cache: true
 paths:

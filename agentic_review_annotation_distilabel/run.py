@@ -27,7 +27,11 @@ from agentic_review_annotation_distilabel.pipelines import (
     DistilabelPipelineConfig,
     run_annotation_pipeline,
 )
-from agentic_review_annotation_distilabel.steps import AgentStepParser, DeNovoSWEStepParser
+from agentic_review_annotation_distilabel.steps import (
+    AgentStepParser,
+    DeNovoSWEStepParser,
+    MiniSWEAgentStepParser,
+)
 
 DEFAULT_INPUT = Path("annotation/samples")
 DEFAULT_NORMALIZED_DIR = Path("agentic_review_annotation_distilabel/data/normalized")
@@ -45,7 +49,7 @@ ADAPTERS = {
 
 STEP_PARSERS = {
     "denovo": DeNovoSWEStepParser,
-    "mini_swe_agent": AgentStepParser,
+    "mini_swe_agent": MiniSWEAgentStepParser,
     "openhands": AgentStepParser,
 }
 
@@ -67,7 +71,7 @@ def main() -> None:
     cache_dir = args.cache_dir or Path(paths.get("cache_dir", DEFAULT_CACHE_DIR))
 
     runner = args.runner or config.get("runner") or "llm"
-    dataset = args.dataset or config.get("dataset") or "denovo"
+    dataset = args.dataset or config.get("dataset") or "mini_swe_agent"
 
     max_retries = int(model_config.get("max_retries", 2))
 
@@ -212,6 +216,8 @@ def prepare_rows(
             "source_path": str(path),
             "raw_keys": list(raw.keys()),
             "instance_id": normalized["instance_id"],
+            "repository": normalized.get("repository"),
+            "environment": normalized.get("environment"),
             "task": normalized["task"],
             "trajectory": sample.trajectory,
             "patch": normalized["patch"],
@@ -250,6 +256,8 @@ def prepare_rows(
                     "max_retries": structured_max_retries,
                 },
                 "task": sample.task,
+                "repository": sample.repository,
+                "environment": sample.environment,
                 "patch": sample.patch,
                 "evaluation": sample.evaluation,
                 "trajectory": sample.trajectory,
@@ -271,6 +279,8 @@ def build_normalized_preview(normalized: dict[str, Any]) -> dict[str, Any]:
         "dataset": normalized["dataset"],
         "source_path": normalized["source_path"],
         "instance_id": normalized["instance_id"],
+        "repository": normalized.get("repository"),
+        "environment_preview": preview_text(normalized.get("environment"), max_chars=2000),
         "task_preview": preview_task(normalized.get("task")),
         "patch_preview": preview_text(normalized.get("patch"), max_chars=3000),
         "evaluation": normalized.get("evaluation"),
@@ -302,6 +312,24 @@ def preview_step(step: dict[str, Any]) -> dict[str, Any]:
             "content_preview": preview_text(content, max_chars=1200),
         }
 
+    if content.get("type") == "agent_turn":
+        return {
+            "step_id": step.get("step_id"),
+            "type": "agent_turn",
+            "agent": preview_message(content.get("agent_message"), max_chars=2400),
+            "actions": preview_text(content.get("actions"), max_chars=1600),
+            "observations": [
+                preview_message(observation, max_chars=1800)
+                for observation in content.get("observations", [])
+                if isinstance(observation, dict)
+            ],
+            "context_messages": [
+                preview_message(message, max_chars=1600)
+                for message in content.get("context_messages", [])
+                if isinstance(message, dict)
+            ],
+        }
+
     action = content.get("action") if isinstance(content.get("action"), dict) else {}
     tool_calls = []
     for tool_call in action.get("tool_calls") or []:
@@ -321,6 +349,21 @@ def preview_step(step: dict[str, Any]) -> dict[str, Any]:
         "reasoning": preview_text(action.get("reasoning_text"), max_chars=1400),
         "tool_calls": tool_calls,
         "observations": preview_text(content.get("observations"), max_chars=1600),
+    }
+
+
+def preview_message(message: Any, max_chars: int) -> dict[str, Any]:
+    if not isinstance(message, dict):
+        return {}
+    return {
+        "role": message.get("role"),
+        "content": preview_text(
+            message.get("content", message.get("text", message.get("message"))),
+            max_chars=max_chars,
+        ),
+        "extra": preview_text(message.get("extra"), max_chars=800)
+        if "extra" in message
+        else None,
     }
 
 
@@ -360,8 +403,7 @@ def is_valid_existing_result(path: Path, instance_id: str, valid_step_ids: list[
         annotation = parse_annotation(
             {
                 "instance_id": payload["instance_id"],
-                "final_outcome": payload["final_outcome"],
-                "failures": payload.get("failures", []),
+                "step_reviews": payload.get("step_reviews", []),
             }
         )
         validate_annotation_against_steps(annotation, instance_id, valid_step_ids)

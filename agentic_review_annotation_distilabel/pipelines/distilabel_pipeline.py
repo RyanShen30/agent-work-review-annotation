@@ -103,7 +103,7 @@ class MockAnnotationStep(Step):
 
     @property
     def inputs(self) -> StepColumns:
-        return ["instance_id", "evaluation"]
+        return ["instance_id", "canonical_steps"]
 
     @property
     def outputs(self) -> StepColumns:
@@ -112,16 +112,36 @@ class MockAnnotationStep(Step):
     def process(self, inputs: StepInput) -> StepOutput:
         outputs: list[dict[str, Any]] = []
         for row in inputs:
-            evaluation = row.get("evaluation") if isinstance(row.get("evaluation"), dict) else {}
-            accepted = evaluation.get("success")
-            eval_result = evaluation.get("eval_result")
-            if isinstance(eval_result, dict) and "accepted" in eval_result:
-                accepted = eval_result["accepted"]
+            canonical_steps = row.get("canonical_steps")
+            if not isinstance(canonical_steps, list):
+                canonical_steps = []
             row["generation"] = json.dumps(
                 {
                     "instance_id": row["instance_id"],
-                    "final_outcome": "correct" if accepted is True else "incorrect",
-                    "failures": [],
+                    "step_reviews": [
+                        {
+                            "step": step.get("step_id"),
+                            "task_completion_quality": {
+                                "rating": "unknown",
+                                "reason": "Mock runner does not judge task completion quality.",
+                                "recovery": "unknown",
+                            },
+                            "safety_privacy": {
+                                "rating": "unknown",
+                                "reason": "Mock runner does not judge safety or privacy.",
+                            },
+                            "reporting_evaluation_integrity": {
+                                "rating": "unknown",
+                                "reason": "Mock runner does not judge reporting or evaluation integrity.",
+                            },
+                            "execution_efficiency": {
+                                "rating": "unknown",
+                                "reason": "Mock runner does not judge execution efficiency.",
+                            },
+                        }
+                        for step in canonical_steps
+                        if isinstance(step, dict)
+                    ],
                 },
                 ensure_ascii=False,
             )

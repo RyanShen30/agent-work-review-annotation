@@ -6,7 +6,7 @@
 
 ```text
 原始 JSON
--> DeNovoSWE Adapter
+-> Dataset Adapter
 -> 确定性 step 切分
 -> 拼 annotation prompt
 -> Distilabel 调用模型
@@ -14,21 +14,17 @@
 -> 保存 annotation JSON
 ```
 
-当前支持的数据集是 DeNovoSWE，输入样例在项目根目录的 `annotation/samples/*.json`。
+默认支持的数据集是 mini-swe-agent，输入样例在项目根目录的 `annotation/samples/mini_swe_agent_sample.json`。
 
 ## 当前支持范围
 
-当前代码只支持 **DeNovoSWE raw JSON**，也就是项目里 `annotation/samples/*.json` 这种结构。
+当前代码支持三种输入注册：
 
-还没有实现：
+- `mini_swe_agent`：默认路径，包含数据 adapter 和专用 step parser；
+- `openhands`：保留 runner 和通用事件 adapter，这一轮不展开；
+- `denovo`：保留兼容 adapter 和单元测试，不再提交 DeNovo 原始样例数据。
 
-- 配置驱动的通用字段映射 adapter；
-- 多数据集 adapter 注册；
-- 按 trajectory 结构选择的多 parser；
-- 可复用的通用 step parser；
-- SWE-agent、OpenHands 等其他数据集的直接接入。
-
-因此现在不能把任意 SWE-agent/OpenHands JSON 直接放进来跑。要支持新的数据源，仍然需要新增对应 adapter 和 step parser，并在 `run.py` 里注册。
+mini-swe-agent 的 runner 负责生成轨迹，`adapters/mini_swe_agent.py` 和 `steps/mini_swe_agent.py` 负责把轨迹接入自动标注。
 
 ## 快速开始
 
@@ -128,13 +124,26 @@ agentic_review_annotation_distilabel/data/auto_annotations/_failed/
 ```json
 {
   "instance_id": "...",
-  "final_outcome": "correct",
-  "failures": [
+  "step_reviews": [
     {
       "step": 14,
-      "reason": "...",
-      "confidence": 0.9,
-      "recovery": "unrecovered"
+      "task_completion_quality": {
+        "rating": "unknown",
+        "reason": "...",
+        "recovery": "unknown"
+      },
+      "safety_privacy": {
+        "rating": "unknown",
+        "reason": "..."
+      },
+      "reporting_evaluation_integrity": {
+        "rating": "unknown",
+        "reason": "..."
+      },
+      "execution_efficiency": {
+        "rating": "unknown",
+        "reason": "..."
+      }
     }
   ]
 }
@@ -142,17 +151,17 @@ agentic_review_annotation_distilabel/data/auto_annotations/_failed/
 
 保存到文件时还会附带 `metadata`，记录模型名、prompt 版本和源文件路径。
 
-## DeNovoSWE 适配
+## mini-swe-agent 适配
 
-当前 adapter 使用真实样例字段：
+当前 adapter 使用 mini-swe-agent 保存结果字段：
 
-- `instance_id` <- `instance_id`
-- `task` <- `initial_messages`
-- `trajectory` <- `trajectory`
-- `patch` <- `patch`
-- `evaluation` <- `success`、`score`、`finish_reason`、`error`、`difficulty`、`eval_result`
+- `instance_id` <- `instance_id` / `info.instance_id`
+- `task` <- `problem` / `task` / `problem_statement` / 第一条 user message
+- `trajectory` <- `messages`
+- `patch` <- `info.submission` / `submission` / `generated_patch` / `model_patch` / `patch`
+- `evaluation` <- `outcome.exit_status`、`info.exit_status`、`eval_result`、`eval_logs`、`model_stats`
 
-当前 step parser 直接使用 DeNovoSWE 原始 trajectory 中的 `step` 编号。`content` 保留完整原始 step，不额外统一内部字段。
+当前 step parser 将每条 assistant message 及其后的 tool/user observations 合成一个 `agent_turn`，并把开头的 system/user context 挂到第一个 step 上。
 
 ## 常用命令
 
@@ -161,7 +170,7 @@ agentic_review_annotation_distilabel/data/auto_annotations/_failed/
 ```bash
 .venv/bin/python -m agentic_review_annotation_distilabel.run \
   --runner llm \
-  --input annotation/samples/sample_002.json \
+  --input annotation/samples/mini_swe_agent_sample.json \
   --overwrite \
   --no-cache
 ```
@@ -171,7 +180,7 @@ agentic_review_annotation_distilabel/data/auto_annotations/_failed/
 ```bash
 .venv/bin/python -m agentic_review_annotation_distilabel.run \
   --runner llm \
-  --input annotation/samples/sample_002.json \
+  --input annotation/samples/mini_swe_agent_sample.json \
   --model-max-new-tokens 8192 \
   --overwrite \
   --no-cache

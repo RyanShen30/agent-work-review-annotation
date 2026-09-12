@@ -12,6 +12,8 @@ class Sample:
     patch: Any | None
     evaluation: Any | None
     raw: Mapping[str, Any]
+    repository: Any | None = None
+    environment: Any | None = None
 
 
 class DatasetAdapter:
@@ -25,4 +27,3 @@ def require_mapping(raw: Any) -> Mapping[str, Any]:
     if not isinstance(raw, Mapping):
         raise ValueError("Raw dataset sample must be a JSON object.")
     return raw
-

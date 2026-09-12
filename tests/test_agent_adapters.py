@@ -4,7 +4,10 @@ from agentic_review_annotation_distilabel.adapters import (
     MiniSWEAgentAdapter,
     OpenHandsAdapter,
 )
-from agentic_review_annotation_distilabel.steps import AgentStepParser
+from agentic_review_annotation_distilabel.steps import (
+    AgentStepParser,
+    MiniSWEAgentStepParser,
+)
 
 
 @pytest.mark.parametrize(
@@ -15,7 +18,12 @@ from agentic_review_annotation_distilabel.steps import AgentStepParser
             {
                 "instance_id": "astropy__astropy-12907",
                 "problem": "fix it",
-                "messages": [{"role": "user", "content": "fix it"}],
+                "messages": [
+                    {"role": "user", "content": "fix something else"},
+                    {"role": "assistant", "content": "I will inspect the repo."},
+                    {"role": "tool", "content": "listing"},
+                    {"role": "assistant", "content": "Done."},
+                ],
                 "outcome": {"exit_status": "Submitted"},
                 "patch": "diff --git a/a.py b/a.py",
             },
@@ -43,6 +51,46 @@ def test_adapts_saved_trajectory(adapter, raw, trajectory_key):
     assert sample.trajectory == raw[trajectory_key]
     assert sample.patch == raw["patch"]
     assert steps[0].step_id == 0
+
+
+def test_mini_swe_agent_adapter_feeds_dedicated_step_parser():
+    raw = {
+        "info": {
+            "instance_id": "django__django-11049",
+            "config": {"environment": {"cwd": "/workspace/django"}},
+            "model_stats": {"cost": 0.42},
+        },
+        "problem": "Fix the regression.",
+        "messages": [
+            {"role": "system", "content": "system context"},
+            {"role": "user", "content": "Fix the regression."},
+            {
+                "role": "assistant",
+                "content": "I will inspect the failing code.",
+                "tool_calls": [{"function": {"name": "bash", "arguments": "pytest"}}],
+            },
+            {"role": "tool", "content": "1 failed"},
+            {"role": "assistant", "content": "I changed the implementation."},
+        ],
+        "outcome": {"exit_status": "Submitted"},
+        "patch": "diff --git a/django/a.py b/django/a.py",
+    }
+
+    sample = MiniSWEAgentAdapter().adapt(raw)
+    steps = MiniSWEAgentStepParser().parse(sample)
+
+    assert sample.instance_id == "django__django-11049"
+    assert sample.task == "Fix the regression."
+    assert sample.evaluation["exit_status"] == "Submitted"
+    assert sample.repository == {"instance_id": "django__django-11049", "cwd": "/workspace/django"}
+    assert len(steps) == 2
+    assert steps[0].content["type"] == "agent_turn"
+    assert steps[0].content["actions"] == [{"function": {"name": "bash", "arguments": "pytest"}}]
+    assert steps[0].content["observations"] == [{"role": "tool", "content": "1 failed"}]
+    assert steps[0].content["context_messages"] == [
+        {"role": "system", "content": "system context"},
+        {"role": "user", "content": "Fix the regression."},
+    ]
 
 
 def test_requires_instance_id():
