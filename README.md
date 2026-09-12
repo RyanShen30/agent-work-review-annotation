@@ -2,27 +2,23 @@
 
 这个项目用于对于不同的coding agent问题使用不同的agent框架生成 的工作轨迹做自动预标注，产出结构化 JSON，之后供人工检查、修正，并沉淀成 GT。
 
-当前可运行版本基于 Distilabel。第一版已经接入项目内现有的 DeNovoSWE 样例，默认样例路径是 `annotation/samples/*.json`。在9.9日组会之后，由予童搭建使用不同的agent框架结合由这不同docker环境的完整项目生成一条Long-Horizon的、完整的working traj。在这一个版本中，我们初步需要支持mini-swe-agents和openhands这两种高影响力并且简洁的coding-agent框架。
+当前版本基于 Distilabel，支持 DeNovoSWE 样例，并可使用 mini-swe-agent 和 OpenHands 在 SWE-bench Docker 环境中生成 trajectory。
 
 ## 当前支持范围
 
-当前代码只支持 **DeNovoSWE raw JSON**，也就是项目里 `annotation/samples/*.json` 这种原始结构。
+当前支持三种输入：
 
-还没有实现：
+- DeNovoSWE `trajectory`；
+- mini-swe-agent `messages`；
+- OpenHands `events`。
 
-- 配置驱动的通用字段映射 adapter；
-- 多数据集 adapter 注册；
-- 按 trajectory 结构选择的多 parser；
-- 可复用的通用 step parser；
-- SWE-agent、OpenHands 等其他数据集的直接接入。
-
-也就是说，现在不能把任意 SWE-agent/OpenHands JSON 直接丢进来跑。要支持新的数据源，仍然需要新增对应 adapter 和 step parser，然后在 `run.py` 里注册。
+各 adapter 将原始结果转换为统一 `Sample`，再进入同一条标注 pipeline。
 
 ## 当前流程
 
 ```text
 原始 JSON
--> DeNovoSWE Adapter
+-> 对应 Adapter
 -> 确定性 step 切分
 -> 拼 annotation prompt
 -> Distilabel 调用模型
@@ -30,7 +26,7 @@
 -> 每条样本保存一个 annotation JSON
 ```
 
-Step 切分不由模型完成。DeNovoSWE 原始 `trajectory` 里已经有明确 step，因此当前 parser 会直接按原 step 一一映射成 canonical steps。
+Step 切分不由模型完成。DeNovoSWE 保留原 step 编号；mini-swe-agent 和 OpenHands 按消息或事件顺序生成 canonical steps。
 
 ## 目录结构
 
@@ -38,9 +34,13 @@ Step 切分不由模型完成。DeNovoSWE 原始 `trajectory` 里已经有明确
 agentic_review_annotation_distilabel/
 ├── adapters/                 # 原始数据 -> 统一 Sample
 │   ├── base.py
-│   └── denovo.py
+│   ├── denovo.py
+│   ├── mini_swe_agent.py
+│   └── openhands.py
+├── agents/                   # 运行 mini-swe-agent / OpenHands
 ├── steps/                    # trajectory -> canonical steps
 │   ├── base.py
+│   ├── agent.py
 │   └── denovo.py
 ├── annotation/               # 输出 schema、prompt builder
 │   ├── prompt_builder.py
@@ -68,6 +68,12 @@ tests/                        # 基础单元测试
 
 ## 安装依赖
 
+克隆仓库后先下载全部 submodule：
+
+```bash
+git submodule update --init --recursive
+```
+
 建议使用虚拟环境：
 
 ```bash
@@ -76,6 +82,8 @@ python3 -m venv .venv
 ```
 
 之后运行命令时，推荐一直用 `.venv/bin/python`，这样不需要手动 `activate`。
+
+并且需要同时配置mini-swe-agent和openhand两个库对应的环境，分别在thirdparty的仓库目录下
 
 ## 配置 API Key
 
@@ -121,6 +129,17 @@ AGENTIC_REVIEW_API_KEY=你的_DeepSeek_Key
 ```
 
 DeepSeek 默认会通过 `extra_body` 关闭 thinking，减少空输出和无效 token 消耗。确实想开启 thinking 时再加 `--enable-thinking`。
+
+## 生成 SWE-bench trajectory
+
+在根目录 `.env` 中设置 `LLM_API_KEY`，其余参数位于 `config/config.*.yaml`：
+
+```bash
+./scripts/run_mini_swe_agent_swe_bench.sh
+./scripts/run_openhand_swe_bench.sh
+```
+
+结果保存到 `output/`。`environment_kwargs.keep_image` 控制任务结束后是否保留 Docker 镜像。
 
 ## 快速自测
 
@@ -269,18 +288,10 @@ Canonical step 当前只包含：
 
 ## 跑测试
 
-当前测试不依赖 pytest，可以直接用标准库 unittest：
-
 ```bash
-.venv/bin/python -m unittest tests.test_distilabel_denovo_pipeline -v
+PYTHONPATH=. uv run --with pytest pytest tests -q
 ```
 
 ## 已知边界
 
-当前版本只正式支持 DeNovoSWE raw JSON。SWE-agent、OpenHands 等其他数据集还没有接入；后续需要先实现统一接口、多 parser 或通用 parser，再复用同一条 Distilabel annotation pipeline。
-
-大样本真实模型标注会产生费用。正式批量跑之前，建议先用 `--runner mock` 检查流程，再用 `--input` 单条样例试跑真实模型。
-
-## 9.9之后的计划
-1. 能在调用api和本地部署模型的两种情况下使用mini-swe-agents和openhands两个开源的coding agents框架对于给定的问题进行产出模型的traj。
-2. 将不同的agent框架产出的结果归一化为agent traj protocal的形式方便忆安后面的处理。
+当前 runner 一次处理一个 SWE-bench 实例。大样本运行和真实模型标注会产生费用，批量运行前建议先单条测试。
