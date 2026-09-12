@@ -1,0 +1,26 @@
+# Select one: mini_swe_agent or openhands
+harness: openhands
+model: openai/gpt-5.4
+
+# The selected benchmark row supplies problem_statement and its Docker image.
+runtime: docker
+benchmark_path: data/swe-bench-verified/SWE-bench_Verified
+instance: 10  # zero-based row index, or an instance_id such as astropy__astropy-12907
+workspace: .
+
+# Agent runtime limits. 0 disables step/cost limits.
+step_limit: 50
+cost_limit: 3.0
+command_timeout: 120
+output_dir: output
+
+# API secrets belong in the root .env, not this YAML.
+base_url: https://aigw.sotatts.online/v1
+model_kwargs:
+  drop_params: true
+
+environment_kwargs:
+  # false removes the per-task Docker image after the run; true keeps it for reuse.
+  keep_image: false
+  cwd: /testbed
+  pull_timeout: 900

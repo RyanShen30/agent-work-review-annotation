@@ -8,7 +8,11 @@ from typing import Any
 
 import yaml
 
-from agentic_review_annotation_distilabel.adapters import DeNovoSWEAdapter
+from agentic_review_annotation_distilabel.adapters import (
+    DeNovoSWEAdapter,
+    MiniSWEAgentAdapter,
+    OpenHandsAdapter,
+)
 from agentic_review_annotation_distilabel.annotation.prompt_builder import (
     PROMPT_VERSION,
     PromptBuilder,
@@ -23,7 +27,7 @@ from agentic_review_annotation_distilabel.pipelines import (
     DistilabelPipelineConfig,
     run_annotation_pipeline,
 )
-from agentic_review_annotation_distilabel.steps import DeNovoSWEStepParser
+from agentic_review_annotation_distilabel.steps import AgentStepParser, DeNovoSWEStepParser
 
 DEFAULT_INPUT = Path("annotation/samples")
 DEFAULT_NORMALIZED_DIR = Path("agentic_review_annotation_distilabel/data/normalized")
@@ -35,10 +39,14 @@ DEFAULT_CACHE_DIR = Path("agentic_review_annotation_distilabel/.distilabel_cache
 
 ADAPTERS = {
     "denovo": DeNovoSWEAdapter,
+    "mini_swe_agent": MiniSWEAgentAdapter,
+    "openhands": OpenHandsAdapter,
 }
 
 STEP_PARSERS = {
     "denovo": DeNovoSWEStepParser,
+    "mini_swe_agent": AgentStepParser,
+    "openhands": AgentStepParser,
 }
 
 

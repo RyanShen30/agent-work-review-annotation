@@ -1,8 +1,13 @@
 .venv/
 .env
+env/
+data/
+output/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.DS_Store
+*.swp
+*.log
 agentic_review_annotation_distilabel/.distilabel_cache/
 agentic_review_annotation_distilabel/config/config.yaml
-*.log
