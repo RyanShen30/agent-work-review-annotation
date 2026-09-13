@@ -1,0 +1,37 @@
+# traj-only: generate trajectory; review-only: annotate existing trajectories; full: both.
+mode: full
+
+generation:
+  harness: mini_swe_agent  # or openhands
+  model: openai/gpt-5.4
+  runtime: docker
+  benchmark_path: data/swe-bench-verified/SWE-bench_Verified
+  instance: 10  # row index, instance_id, or -1 for the entire benchmark
+  workspace: .
+  step_limit: 50
+  cost_limit: 3.0
+  command_timeout: 120
+  model_kwargs:
+    drop_params: true
+  environment_kwargs:
+    keep_image: false
+    cwd: /testbed
+    pull_timeout: 900
+
+review:
+  dataset: mini_swe_agent  # must match generation.harness
+  input: output/traj
+  runner: llm
+  use_cache: true
+  model:
+    model: gpt-5.4
+    temperature: 0.0
+    max_new_tokens: 4096
+    timeout_seconds: 120
+    max_retries: 2
+  prompt_budget:
+    compact_for_model: false
+    max_task_chars: 12000
+    max_patch_chars: 20000
+    max_step_chars: 6000
+    max_total_step_chars: 60000

@@ -1,9 +1,12 @@
+import json
+
 import pytest
 
 from agentic_review_annotation_distilabel.adapters import (
     MiniSWEAgentAdapter,
     OpenHandsAdapter,
 )
+from agentic_review_annotation_distilabel.run import collect_input_paths
 from agentic_review_annotation_distilabel.steps import (
     AgentStepParser,
     MiniSWEAgentStepParser,
@@ -53,6 +56,25 @@ def test_adapts_saved_trajectory(adapter, raw, trajectory_key):
     assert steps[0].step_id == 0
 
 
+def test_mini_swe_agent_adapter_drops_raw_response_but_keeps_actions():
+    sample = MiniSWEAgentAdapter().adapt(
+        {
+            "instance_id": "repo__repo-1",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "provider_specific_fields": {},
+                    "extra": {"actions": [{"command": "pytest"}], "response": {"choices": []}},
+                }
+            ],
+        }
+    )
+
+    assert sample.trajectory == [
+        {"role": "assistant", "extra": {"actions": [{"command": "pytest"}]}}
+    ]
+
+
 def test_mini_swe_agent_adapter_feeds_dedicated_step_parser():
     raw = {
         "info": {
@@ -96,3 +118,12 @@ def test_mini_swe_agent_adapter_feeds_dedicated_step_parser():
 def test_requires_instance_id():
     with pytest.raises(ValueError, match="instance_id"):
         MiniSWEAgentAdapter().adapt({"messages": [{"role": "user", "content": "task"}]})
+
+
+def test_directory_input_filters_other_harnesses(tmp_path):
+    mini = tmp_path / "mini.json"
+    openhands = tmp_path / "openhands.json"
+    mini.write_text(json.dumps({"harness": "mini_swe_agent"}))
+    openhands.write_text(json.dumps({"harness": "openhands"}))
+
+    assert collect_input_paths(tmp_path, "mini_swe_agent") == [mini]

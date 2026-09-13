@@ -1,7 +1,15 @@
 import sys
 import types
 
-from agentic_review_annotation_distilabel.agents.run import load_instance, swebench_image
+from agentic_review_annotation_distilabel.agents import run
+from agentic_review_annotation_distilabel.agents.run import load_instance, load_instances, swebench_image
+
+
+def test_minus_one_loads_entire_benchmark(monkeypatch):
+    rows = [{"instance_id": "one"}, {"instance_id": "two"}]
+    monkeypatch.setattr(run, "load_benchmark", lambda path: rows)
+
+    assert load_instances("benchmark", -1) == rows
 
 
 def test_loads_first_swebench_image(tmp_path, monkeypatch):

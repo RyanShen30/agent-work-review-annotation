@@ -1,159 +1,58 @@
-# Agentic Work Review 自动标注框架
+# Agentic Work Review 核心模块
 
-这个目录里是当前可运行的 Distilabel 版本，用来对 SWE Agent trajectory 做自动预标注。
+这个目录包含 trajectory adapter、确定性 step 切分、annotation schema、prompt 和 Distilabel review pipeline。项目统一入口和用户配置位于仓库根目录。
 
-## 流程
+## 支持的输入
 
-```text
-原始 JSON
--> Dataset Adapter
--> 确定性 step 切分
--> 拼 annotation prompt
--> Distilabel 调用模型
--> Pydantic 校验结构化 JSON
--> 保存 annotation JSON
-```
+- `mini_swe_agent`：默认路径，使用专用 message step parser；
+- `openhands`：使用 event adapter；
+- `denovo`：保留兼容 adapter 和单元测试。
 
-默认支持的数据集是 mini-swe-agent，输入样例在项目根目录的 `annotation/samples/mini_swe_agent_sample.json`。
-
-## 当前支持范围
-
-当前代码支持三种输入注册：
-
-- `mini_swe_agent`：默认路径，包含数据 adapter 和专用 step parser；
-- `openhands`：保留 runner 和通用事件 adapter，这一轮不展开；
-- `denovo`：保留兼容 adapter 和单元测试，不再提交 DeNovo 原始样例数据。
-
-mini-swe-agent 的 runner 负责生成轨迹，`adapters/mini_swe_agent.py` 和 `steps/mini_swe_agent.py` 负责把轨迹接入自动标注。
-
-## 快速开始
-
-在项目根目录执行：
-
-```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -r agentic_review_annotation_distilabel/requirements.txt
-```
-
-先用 mock 跑通流程：
-
-```bash
-.venv/bin/python -m agentic_review_annotation_distilabel.run \
-  --runner mock \
-  --limit 3 \
-  --overwrite
-```
-
-配置好 API key 后，用真实模型跑：
-
-```bash
-set -a
-source .env
-set +a
-
-.venv/bin/python -m agentic_review_annotation_distilabel.run \
-  --runner llm \
-  --limit 3 \
-  --overwrite \
-  --no-cache
-```
-
-## API 配置
-
-支持 OpenAI-compatible 模型服务。优先读取环境变量：
-
-```bash
-AGENTIC_REVIEW_API_KEY
-AGENTIC_REVIEW_MODEL
-AGENTIC_REVIEW_BASE_URL
-```
-
-也兼容：
-
-```bash
-OPENAI_API_KEY
-OPENAI_BASE_URL
-```
-
-`.env` 不会被 Python 自动加载，需要在终端里 `source .env`。同一个终端加载一次即可，关闭终端后需要重新加载。
-
-也可以复制配置模板：
-
-```bash
-cp agentic_review_annotation_distilabel/config/config.example.yaml \
-  agentic_review_annotation_distilabel/config/config.yaml
-```
-
-然后运行：
-
-```bash
-.venv/bin/python -m agentic_review_annotation_distilabel.run \
-  --config agentic_review_annotation_distilabel/config/config.yaml
-```
-
-## 运行产物
-
-完整 normalized 输入：
+处理流程：
 
 ```text
-agentic_review_annotation_distilabel/data/normalized/
+trajectory JSON -> adapter -> canonical steps -> prompt -> Distilabel -> schema 校验 -> annotation JSON
 ```
 
-人工快速查看用 preview：
+## 从根目录运行
+
+API 只从终端环境读取：
+
+```bash
+export LLM_API_KEY=你的_Key
+export LLM_BASE_URL=https://example.com/v1
+```
+
+用户修改对应脚本顶部的参数；`config/example.yaml` 只是完整配置示例：
+
+```bash
+./scripts/run_mini_swe_agent.sh     # 仅生成 trajectory
+./scripts/run_agent_work_review.sh  # 仅 review 已有 trajectory
+./scripts/run_pipeline.sh           # 生成并 review
+```
+
+## 路径
 
 ```text
-agentic_review_annotation_distilabel/data/normalized_preview/
+config/example.yaml                         # 完整配置示例
+scripts/run_mini_swe_agent.sh               # traj-only 用户参数
+scripts/run_agent_work_review.sh            # review-only 用户参数
+scripts/run_pipeline.sh                     # full 用户参数
+output/traj/                                # traj-only 结果
+output/annotation/normalized/               # review-only 标准化输入
+output/annotation/preview/                  # review-only 人工预览
+output/annotation/annotation/               # review-only 标注
+output/pipeline/traj/                       # full 轨迹
+output/pipeline/normalized/                 # full 标准化输入
+output/pipeline/preview/                    # full 人工预览
+output/pipeline/annotation/                 # full 标注
 ```
 
-最终模型自动标注：
-
-```text
-agentic_review_annotation_distilabel/data/auto_annotations/
-```
-
-失败的原始模型输出：
-
-```text
-agentic_review_annotation_distilabel/data/auto_annotations/_failed/
-```
-
-## 输出格式
-
-核心 annotation schema：
-
-```json
-{
-  "instance_id": "...",
-  "step_reviews": [
-    {
-      "step": 14,
-      "task_completion_quality": {
-        "rating": "unknown",
-        "reason": "...",
-        "recovery": "unknown"
-      },
-      "safety_privacy": {
-        "rating": "unknown",
-        "reason": "..."
-      },
-      "reporting_evaluation_integrity": {
-        "rating": "unknown",
-        "reason": "..."
-      },
-      "execution_efficiency": {
-        "rating": "unknown",
-        "reason": "..."
-      }
-    }
-  ]
-}
-```
-
-保存到文件时还会附带 `metadata`，记录模型名、prompt 版本和源文件路径。
+无效的模型输出会写入对应 annotation 目录下的 `_failed/`。
 
 ## mini-swe-agent 适配
 
-当前 adapter 使用 mini-swe-agent 保存结果字段：
+字段映射：
 
 - `instance_id` <- `instance_id` / `info.instance_id`
 - `task` <- `problem` / `task` / `problem_statement` / 第一条 user message
@@ -161,41 +60,14 @@ agentic_review_annotation_distilabel/data/auto_annotations/_failed/
 - `patch` <- `info.submission` / `submission` / `generated_patch` / `model_patch` / `patch`
 - `evaluation` <- `outcome.exit_status`、`info.exit_status`、`eval_result`、`eval_logs`、`model_stats`
 
-当前 step parser 将每条 assistant message 及其后的 tool/user observations 合成一个 `agent_turn`，并把开头的 system/user context 挂到第一个 step 上。
+每条 assistant message 与其后的 tool/user observations 会组成一个 `agent_turn`；开头的 system/user context 会放到第一个 step。
 
-## 常用命令
+## 测试
 
-跑单条：
-
-```bash
-.venv/bin/python -m agentic_review_annotation_distilabel.run \
-  --runner llm \
-  --input annotation/samples/mini_swe_agent_sample.json \
-  --overwrite \
-  --no-cache
-```
-
-增大输出 token：
+从仓库根目录运行：
 
 ```bash
-.venv/bin/python -m agentic_review_annotation_distilabel.run \
-  --runner llm \
-  --input annotation/samples/mini_swe_agent_sample.json \
-  --model-max-new-tokens 8192 \
-  --overwrite \
-  --no-cache
+PYTHONPATH=. uv run --with pytest pytest -q
 ```
 
-跑测试：
-
-```bash
-.venv/bin/python -m unittest tests.test_distilabel_denovo_pipeline -v
-```
-
-## 注意事项
-
-- `mock` 只检查流程，不代表真实 review 质量。
-- 改了 prompt 或 schema 后，建议加 `--no-cache`。
-- 正式标注默认会把完整 task、patch、canonical steps 发给模型。
-- `--compact-model-input` 只适合低成本调试，不适合正式标注。
-- 大模型调用会产生费用，批量跑之前先单条试跑。
+`mock` 只验证流程，不代表 review 质量。正式批量运行前建议先测试单个 instance。

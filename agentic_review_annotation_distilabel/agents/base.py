@@ -29,7 +29,7 @@ class AgentConfig(BaseModel):
     step_limit: int = Field(default=50, ge=0)
     cost_limit: float = Field(default=3.0, ge=0)
     command_timeout: int = Field(default=30, gt=0)
-    output_dir: Path = PROJECT_ROOT / "output"
+    output_dir: Path = PROJECT_ROOT / "output" / "traj"
     model_kwargs: dict[str, Any] = Field(default_factory=dict)
     environment_kwargs: dict[str, Any] = Field(default_factory=dict)
 

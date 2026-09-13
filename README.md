@@ -50,20 +50,18 @@ agentic_review_annotation_distilabel/
 │   └── distilabel_pipeline.py
 ├── prompts/
 │   └── annotation_v1.md
-├── config/
-│   └── config.example.yaml
-├── data/
-│   ├── normalized/           # 运行后生成：完整 normalized 输入
-│   ├── normalized_preview/   # 运行后生成：便于人工快速查看的 preview
-│   └── auto_annotations/     # 运行后生成：最终自动标注 JSON
-├── requirements.txt
 └── run.py
-```
 
-项目根目录还有：
-
-```text
-annotation/samples/           # 小型 mini-swe-agent mock 样例
+config/
+└── example.yaml              # 完整配置示例，不需要修改
+scripts/
+├── run_mini_swe_agent.sh     # traj-only 参数与入口
+├── run_agent_work_review.sh  # review-only 参数与入口
+└── run_pipeline.sh           # full 参数与入口
+output/
+├── traj/                     # traj-only 轨迹
+├── annotation/               # review-only 产物
+└── pipeline/                 # full 模式轨迹及标注产物
 tests/                        # 基础单元测试
 ```
 
@@ -86,143 +84,69 @@ python3 -m venv .venv
 
 并且需要同时配置mini-swe-agent和openhand两个库对应的环境，分别在thirdparty的仓库目录下
 
-## 配置 API Key
+## 统一配置与运行
 
-模型调用走 OpenAI-compatible 接口。支持这些环境变量：
-
-```bash
-AGENTIC_REVIEW_API_KEY
-AGENTIC_REVIEW_MODEL
-AGENTIC_REVIEW_BASE_URL
-```
-
-也兼容：
+`config/example.yaml` 是完整示例且无需修改；用户直接修改对应 shell 脚本顶部的变量。API 凭证只从当前终端环境读取，不读取 `.env`：
 
 ```bash
-OPENAI_API_KEY
-OPENAI_BASE_URL
+export LLM_API_KEY=你的_Key
+export LLM_BASE_URL=https://example.com/v1
 ```
 
-如果项目根目录已有 `.env`，当前代码不会自动读取它，需要在同一个终端里加载一次：
+生成与 review 阶段直接读取同一组变量；config 不保存凭证或 base URL，也不修改 thirdparty 代码。模型名称及其他运行参数在对应脚本顶部设置。
+
+顶层 `mode` 支持 `traj-only`、`review-only`、`full`。三个脚本都显式使用 `config/example.yaml`，并用脚本中的变量覆盖全部相关参数：
 
 ```bash
-set -a
-source .env
-set +a
+./scripts/run_mini_swe_agent.sh     # traj-only
+./scripts/run_agent_work_review.sh  # review-only
+./scripts/run_pipeline.sh           # full
 ```
 
-同一个终端窗口里加载一次即可，后续多次运行不需要重复加载。关闭终端后需要重新加载。
-
-OpenRouter 示例：
+统一入口也可以直接运行：
 
 ```bash
-AGENTIC_REVIEW_BASE_URL=https://openrouter.ai/api/v1
-AGENTIC_REVIEW_MODEL=minimax/minimax-m3:free
-AGENTIC_REVIEW_API_KEY=你的_OpenRouter_Key
+.venv/bin/python main.py --config config/example.yaml
 ```
 
-DeepSeek 示例：
+通常直接修改脚本顶部变量即可。`INSTANCE` 支持 benchmark 行号、instance ID，或 `-1`（依次运行整个 benchmark）。如需临时覆盖，也可以直接调用入口：
 
 ```bash
-AGENTIC_REVIEW_BASE_URL=https://api.deepseek.com
-AGENTIC_REVIEW_MODEL=deepseek-chat
-AGENTIC_REVIEW_API_KEY=你的_DeepSeek_Key
+.venv/bin/python main.py --config config/example.yaml --mode traj-only --instance 10
+.venv/bin/python main.py --config config/example.yaml --mode review-only --input output/traj --runner mock
+.venv/bin/python main.py --config config/example.yaml --mode full --instance astropy__astropy-14365
 ```
 
-DeepSeek 默认会通过 `extra_body` 关闭 thinking，减少空输出和无效 token 消耗。确实想开启 thinking 时再加 `--enable-thinking`。
-
-## 生成 SWE-bench trajectory
-
-在根目录 `.env` 中设置 `LLM_API_KEY`，其余参数位于 `config/config.*.yaml`：
-
-```bash
-./scripts/run_mini_swe_agent_swe_bench.sh
-./scripts/run_openhand_swe_bench.sh
-```
-
-结果保存到 `output/`。`environment_kwargs.keep_image` 控制任务结束后是否保留 Docker 镜像。
+输出分别位于 `output/traj/`、`output/annotation/`、`output/pipeline/`。
 
 ## 快速自测
 
-不调用真实模型，用 mock 跑完整流程：
+把 `scripts/run_agent_work_review.sh` 中的 `RUNNER` 改为 `mock`，并将 `INPUT` 指向一个已有 trajectory 文件或目录，然后运行：
 
 ```bash
-.venv/bin/python -m agentic_review_annotation_distilabel.run \
-  --runner mock \
-  --limit 3 \
-  --overwrite
+./scripts/run_agent_work_review.sh
 ```
 
-这个命令默认读取 `annotation/samples/mini_swe_agent_sample.json`，会验证：
-
-- 能读取原始 JSON；
-- 能适配 mini-swe-agent 字段；
-- 能用 MiniSWEAgent 专用 step parser 切出 canonical steps；
-- 能走 Distilabel pipeline；
-- 能生成并保存结构合法的 annotation JSON。
-
-Mock 结果只用于检查流程，不代表真实标注质量。
-
-## 使用真实模型运行
-
-加载 `.env` 后运行：
-
-```bash
-.venv/bin/python -m agentic_review_annotation_distilabel.run \
-  --runner llm \
-  --limit 3 \
-  --overwrite \
-  --no-cache
-```
-
-如果只想跑某一个样例，可以指定单个文件：
-
-```bash
-.venv/bin/python -m agentic_review_annotation_distilabel.run \
-  --runner llm \
-  --input annotation/samples/mini_swe_agent_sample.json \
-  --overwrite \
-  --no-cache
-```
-
-如果模型经常输出被截断，可以适当增大输出 token：
-
-```bash
-.venv/bin/python -m agentic_review_annotation_distilabel.run \
-  --runner llm \
-  --input annotation/samples/mini_swe_agent_sample.json \
-  --model-max-new-tokens 8192 \
-  --overwrite \
-  --no-cache
-```
+Mock 只检查 adapter、step parser、Distilabel pipeline 和输出保存流程，不代表真实标注质量。真实运行时将 `RUNNER` 改回 `llm`。
 
 ## 产物在哪里
 
-运行后会生成三类文件：
+按运行模式保存：
 
 ```text
-agentic_review_annotation_distilabel/data/normalized/
+output/traj/*.json                         # traj-only 原始轨迹
+output/annotation/normalized/*.json        # review-only 标准化输入
+output/annotation/preview/*.json           # review-only 人工预览
+output/annotation/annotation/*.json        # review-only 最终标注
+output/annotation/annotation/_failed/      # review-only 失败输出
+output/pipeline/traj/*.json                # full 原始轨迹
+output/pipeline/normalized/*.json          # full 标准化输入
+output/pipeline/preview/*.json             # full 人工预览
+output/pipeline/annotation/*.json          # full 最终标注
+output/pipeline/annotation/_failed/        # full 失败输出
 ```
 
-完整 normalized 输入。这里会保留原始 `trajectory`，并额外包含 `canonical_steps`。
-
-```text
-agentic_review_annotation_distilabel/data/normalized_preview/
-```
-
-便于人工快速检查的精简 preview。它不用于模型标注，只是给人看结构。
-
-```text
-agentic_review_annotation_distilabel/data/auto_annotations/
-```
-
-最终自动标注 JSON。每条样本一个文件，文件名是 `{instance_id}.json`。
-
-如果模型返回空内容或结构不合法，原始生成内容会保存到：
-
-```text
-agentic_review_annotation_distilabel/data/auto_annotations/_failed/
-```
+`normalized` 保留 trajectory 和 canonical steps；`preview` 仅供人工快速检查。
 
 ## 输出 JSON 格式
 
@@ -256,7 +180,7 @@ agentic_review_annotation_distilabel/data/auto_annotations/_failed/
   "metadata": {
     "model": "model-name",
     "prompt_version": "annotation_v1",
-    "source_path": "annotation/samples/mini_swe_agent_sample.json"
+    "source_path": "output/traj/mini_swe_agent__example.json"
   }
 }
 ```
@@ -297,7 +221,7 @@ MiniSWEAgent step parser 会把一条 assistant message 和其后的 tool/user o
 
 ## 常用参数
 
-- `--input`：输入 JSON 文件或目录，默认 `annotation/samples`。
+- `--input`：输入 trajectory JSON 文件或目录；脚本默认使用 `output/traj`。
 - `--limit N`：最多处理 N 条。
 - `--start-index N`：从排序后的第 N 条开始跑。
 - `--runner mock|llm`：mock 不调模型，llm 调真实模型。
@@ -314,4 +238,4 @@ PYTHONPATH=. uv run --with pytest pytest tests -q
 
 ## 已知边界
 
-当前 runner 一次处理一个 SWE-bench 实例。大样本运行和真实模型标注会产生费用，批量运行前建议先单条测试。
+`INSTANCE=-1` 会顺序处理整个 SWE-bench。大样本运行和真实模型标注会产生费用，批量运行前建议先单条测试。

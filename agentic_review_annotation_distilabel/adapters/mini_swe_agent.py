@@ -30,7 +30,9 @@ class MiniSWEAgentAdapter(DatasetAdapter):
         info = raw.get("info") if isinstance(raw.get("info"), Mapping) else {}
         config = info.get("config") if isinstance(info.get("config"), Mapping) else {}
         environment = (
-            config.get("environment") if isinstance(config.get("environment"), Mapping) else None
+            config.get("environment")
+            if isinstance(config.get("environment"), Mapping)
+            else None
         )
 
         return Sample(
@@ -71,7 +73,12 @@ def _extract_messages(raw: Mapping[str, Any]) -> list[dict[str, Any]]:
     for index, message in enumerate(candidate):
         if not isinstance(message, Mapping):
             raise ValueError(f"Message {index} must be a JSON object.")
-        messages.append(dict(message))
+        message = dict(message)
+        message.pop("provider_specific_fields", None)
+        if isinstance(message.get("extra"), Mapping):
+            message["extra"] = dict(message["extra"])
+            message["extra"].pop("response", None)
+        messages.append(message)
     if not messages:
         raise ValueError("mini-swe-agent messages list must not be empty.")
     return messages

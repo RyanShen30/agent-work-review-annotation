@@ -34,12 +34,10 @@ from agentic_review_annotation_distilabel.steps import (
 )
 
 DEFAULT_INPUT = Path("annotation/samples")
-DEFAULT_NORMALIZED_DIR = Path("agentic_review_annotation_distilabel/data/normalized")
-DEFAULT_NORMALIZED_PREVIEW_DIR = Path(
-    "agentic_review_annotation_distilabel/data/normalized_preview"
-)
-DEFAULT_OUTPUT_DIR = Path("agentic_review_annotation_distilabel/data/auto_annotations")
-DEFAULT_CACHE_DIR = Path("agentic_review_annotation_distilabel/.distilabel_cache")
+DEFAULT_NORMALIZED_DIR = Path("output/annotation/normalized")
+DEFAULT_NORMALIZED_PREVIEW_DIR = Path("output/annotation/preview")
+DEFAULT_OUTPUT_DIR = Path("output/annotation/annotation")
+DEFAULT_CACHE_DIR = Path("output/annotation/cache")
 
 ADAPTERS = {
     "denovo": DeNovoSWEAdapter,
@@ -57,10 +55,11 @@ STEP_PARSERS = {
 def main() -> None:
     args = parse_args()
     config = load_config(args.config)
+    config = config.get("review", config)
     paths = config.get("paths") if isinstance(config.get("paths"), dict) else {}
     model_config = config.get("model") if isinstance(config.get("model"), dict) else {}
 
-    input_path = args.input or Path(paths.get("input", DEFAULT_INPUT))
+    input_path = args.input or Path(config.get("input", paths.get("input", DEFAULT_INPUT)))
     normalized_dir = args.normalized_dir or Path(
         paths.get("normalized_dir", DEFAULT_NORMALIZED_DIR)
     )
@@ -77,12 +76,14 @@ def main() -> None:
 
     max_new_tokens = args.model_max_new_tokens or int(model_config.get("max_new_tokens", 4096))
 
+    prompt_budget = config.get("prompt_budget", {})
     prompt_builder = PromptBuilder(
-        compact_for_model=args.compact_model_input,
-        max_task_chars=args.max_task_chars,
-        max_patch_chars=args.max_patch_chars,
-        max_step_chars=args.max_step_chars,
-        max_total_step_chars=args.max_total_step_chars,
+        compact_for_model=args.compact_model_input or bool(prompt_budget.get("compact_for_model", False)),
+        max_task_chars=args.max_task_chars or int(prompt_budget.get("max_task_chars", 12000)),
+        max_patch_chars=args.max_patch_chars or int(prompt_budget.get("max_patch_chars", 20000)),
+        max_step_chars=args.max_step_chars or int(prompt_budget.get("max_step_chars", 6000)),
+        max_total_step_chars=args.max_total_step_chars
+        or int(prompt_budget.get("max_total_step_chars", 60000)),
     )
 
     rows = prepare_rows(
@@ -98,28 +99,20 @@ def main() -> None:
         prompt_builder=prompt_builder,
     )
 
+    api_key = os.environ.get("LLM_API_KEY")
+    base_url = os.environ.get("LLM_BASE_URL")
     pipeline_config = DistilabelPipelineConfig(
         runner=runner,
-        model=os.environ.get("AGENTIC_REVIEW_MODEL")
-        or model_config.get("model")
-        or ("mock" if runner == "mock" else "gpt-4.1"),
-        api_key=os.environ.get("AGENTIC_REVIEW_API_KEY")
-        or os.environ.get("OPENAI_API_KEY")
-        or model_config.get("api_key"),
-        base_url=os.environ.get("AGENTIC_REVIEW_BASE_URL")
-        or os.environ.get("OPENAI_BASE_URL")
-        or model_config.get("base_url"),
+        model=model_config.get("model") or ("mock" if runner == "mock" else "gpt-4.1"),
+        api_key=api_key,
+        base_url=base_url,
         temperature=float(model_config.get("temperature", 0.0)),
         max_new_tokens=max_new_tokens,
         timeout_seconds=int(model_config.get("timeout_seconds", 120)),
         max_retries=max_retries,
         extra_body=build_extra_body(
-            base_url=os.environ.get("AGENTIC_REVIEW_BASE_URL")
-            or os.environ.get("OPENAI_BASE_URL")
-            or model_config.get("base_url"),
-            model=os.environ.get("AGENTIC_REVIEW_MODEL")
-            or model_config.get("model")
-            or "",
+            base_url=base_url,
+            model=model_config.get("model") or "",
             model_config=model_config,
             disable_thinking=args.disable_thinking,
             enable_thinking=args.enable_thinking,
@@ -130,10 +123,7 @@ def main() -> None:
     )
 
     if runner == "llm" and not pipeline_config.api_key:
-        raise RuntimeError(
-            "Missing API key for llm runner. Set AGENTIC_REVIEW_API_KEY or OPENAI_API_KEY, "
-            "configure model.api_key, or run with --runner mock."
-        )
+        raise RuntimeError("Missing API key: export LLM_API_KEY or run with --runner mock.")
 
     saved = run_and_save_each(rows, pipeline_config, output_dir)
     print(f"done: queued={len(rows)} saved={saved} output_dir={output_dir}")
@@ -169,10 +159,10 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use a truncated payload for cheap pipeline debugging. Formal annotation uses full input by default.",
     )
-    parser.add_argument("--max-task-chars", type=int, default=12000)
-    parser.add_argument("--max-patch-chars", type=int, default=20000)
-    parser.add_argument("--max-step-chars", type=int, default=6000)
-    parser.add_argument("--max-total-step-chars", type=int, default=60000)
+    parser.add_argument("--max-task-chars", type=int)
+    parser.add_argument("--max-patch-chars", type=int)
+    parser.add_argument("--max-step-chars", type=int)
+    parser.add_argument("--max-total-step-chars", type=int)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--no-cache", action="store_true")
     return parser.parse_args()
@@ -193,7 +183,7 @@ def prepare_rows(
 ) -> list[dict[str, Any]]:
     adapter = ADAPTERS[dataset]()
     step_parser = STEP_PARSERS[dataset]()
-    input_paths = collect_input_paths(input_path)
+    input_paths = collect_input_paths(input_path, dataset)
     input_paths = input_paths[start_index:]
     if limit is not None:
         input_paths = input_paths[:limit]
@@ -389,12 +379,19 @@ def preview_text(value: Any, max_chars: int) -> dict[str, Any]:
     }
 
 
-def collect_input_paths(path: Path) -> list[Path]:
+def collect_input_paths(path: Path, dataset: str | None = None) -> list[Path]:
     if path.is_file():
         return [path]
     if not path.exists():
         raise FileNotFoundError(path)
-    return sorted(child for child in path.iterdir() if child.suffix == ".json" and child.is_file())
+    paths = sorted(child for child in path.iterdir() if child.suffix == ".json" and child.is_file())
+    if dataset:
+        paths = [
+            child
+            for child in paths
+            if json.loads(child.read_text(encoding="utf-8")).get("harness") in (None, dataset)
+        ]
+    return paths
 
 
 def is_valid_existing_result(path: Path, instance_id: str, valid_step_ids: list[int]) -> bool:
