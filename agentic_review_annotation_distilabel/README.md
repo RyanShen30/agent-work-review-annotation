@@ -11,7 +11,15 @@
 处理流程：
 
 ```text
-trajectory JSON -> adapter -> canonical steps -> prompt -> Distilabel -> schema 校验 -> annotation JSON
+原始 JSON
+-> Dataset Adapter
+-> 确定性 step 切分
+-> 四个专职 annotation prompt
+-> Distilabel 独立调用四个 annotator
+-> Pydantic 校验四个 typed result
+-> deterministic merger
+-> 更新 master record
+-> 从 master 导出 public/private/auto annotation JSON
 ```
 
 ## 从根目录运行
@@ -42,13 +50,108 @@ output/traj/                                # traj-only 结果
 output/annotation/normalized/               # review-only 标准化输入
 output/annotation/preview/                  # review-only 人工预览
 output/annotation/annotation/               # review-only 标注
+output/annotation/public/                   # review-only public export
+output/annotation/private/                  # review-only private export
 output/pipeline/traj/                       # full 轨迹
 output/pipeline/normalized/                 # full 标准化输入
 output/pipeline/preview/                    # full 人工预览
 output/pipeline/annotation/                 # full 标注
+output/pipeline/public/                     # full public export
+output/pipeline/private/                    # full private export
 ```
 
 无效的模型输出会写入对应 annotation 目录下的 `_failed/`。
+
+## 输出格式
+
+`output/*/normalized/` 中的 master record 是唯一事实源，核心结构是：
+
+```json
+{
+  "schema_version": "agent_work_review.master.v1",
+  "instance_id": "...",
+  "source": {
+    "benchmark": "SWE-bench_Verified",
+    "repo": "...",
+    "base_commit": "...",
+    "problem_statement": "..."
+  },
+  "run": {
+    "harness": "mini_swe_agent",
+    "model": "...",
+    "generated_patch": "..."
+  },
+  "trajectory": {
+    "raw_path": "...",
+    "raw_sha256": "...",
+    "canonical_steps": []
+  },
+  "evaluation": {},
+  "oracle": {
+    "gold_patch": "...",
+    "test_patch": "...",
+    "fail_to_pass": [],
+    "pass_to_pass": []
+  },
+  "annotation": {
+    "auto": {
+      "model": "...",
+      "prompt_version": "annotation_v2_specialized",
+      "step_reviews": []
+    },
+    "final": null
+  },
+  "provenance": {}
+}
+```
+
+`output/*/public/` 默认使用 `benchmark_task` 模式，只包含 reviewer 做题所需信息：`instance_id`、`problem_statement`、`repo`、`base_commit`、必要环境信息、agent/model 元数据、`canonical_steps` 和 `generated_patch`。默认 public export 不包含 `step_reviews`、gold patch、test patch、FAIL_TO_PASS、PASS_TO_PASS、resolved 或 evaluator logs。
+
+`output/*/private/` 包含 evaluation、oracle、`annotation.final` 和必要 provenance/audit 信息。公开分析集需要显式调用 `export_public(..., mode="annotation_release")` 才会包含 final step annotation。
+
+兼容保存的 auto annotation schema：
+
+```json
+{
+  "instance_id": "...",
+  "step_reviews": [
+    {
+      "step": 14,
+      "task_completion_quality": {
+        "rating": "unknown",
+        "reason": "..."
+      },
+      "safety_privacy": {
+        "rating": "unknown",
+        "reason": "..."
+      },
+      "reporting_evaluation_integrity": {
+        "rating": "unknown",
+        "reason": "..."
+      },
+      "execution_efficiency": {
+        "rating": "unknown",
+        "reason": "..."
+      }
+    }
+  ]
+}
+```
+
+保存到文件时还会附带 `metadata`，记录模型名、prompt 版本和源文件路径。
+
+`reason` 只在该维度确实有问题或证据不足时出现；正常 step 不写空 reason 或泛泛的正常说明。`recovery` 只属于 `task_completion_quality`，且只有真实 correctness/task-completion error 后续被修复时才写 `"recovery": true`。
+
+## 专职 annotator
+
+自动标注阶段包含四个独立 LLM 调用：
+
+- `TaskCompletionQualityAnnotator` 只输出 `CorrectnessAnnotationResult`，判断 `task_completion_quality` 的 `pass/error` 和可选 `recovery: true`。
+- `SafetyPrivacyAnnotator` 只输出 `SafetyPrivacyAnnotationResult`，判断 `safety_privacy` 的 `pass/issue`。
+- `ReportingEvaluationIntegrityAnnotator` 只输出 `ReportingIntegrityAnnotationResult`，判断 `reporting_evaluation_integrity` 的 `pass/issue`。
+- `ExecutionEfficiencyAnnotator` 只输出 `ExecutionEfficiencyAnnotationResult`，判断 `execution_efficiency` 的 `pass/issue`。
+
+`annotation/merge.py` 会按 `step_id` 确定性合并四份 typed result，并映射回兼容的 `StepReview`。合并前会拒绝重复 step、未知 step、缺失 step、pass 项 reason、非 correctness recovery，以及 `recovery` 出现在非 error correctness step 的情况。
 
 ## mini-swe-agent 适配
 
@@ -57,7 +160,9 @@ output/pipeline/annotation/                 # full 标注
 - `instance_id` <- `instance_id` / `info.instance_id`
 - `task` <- `problem` / `task` / `problem_statement` / 第一条 user message
 - `trajectory` <- `messages`
-- `patch` <- `info.submission` / `submission` / `generated_patch` / `model_patch` / `patch`
+- `run.generated_patch` <- `info.submission` / `submission` / `generated_patch` / `model_patch` / runner 顶层 `patch`
+- `oracle.gold_patch` <- SWE-bench `patch`
+- `oracle.test_patch`、`fail_to_pass`、`pass_to_pass`、`eval_type`、`eval_image`、`eval_script`、`log_parser` <- SWE-bench 对应字段
 - `evaluation` <- `outcome.exit_status`、`info.exit_status`、`eval_result`、`eval_logs`、`model_stats`
 
 每条 assistant message 与其后的 tool/user observations 会组成一个 `agent_turn`；开头的 system/user context 会放到第一个 step。
@@ -71,3 +176,4 @@ PYTHONPATH=. uv run --with pytest pytest -q
 ```
 
 `mock` 只验证流程，不代表 review 质量。正式批量运行前建议先测试单个 instance。
+改了 prompt 或 schema 后，建议加 `--no-cache`。正式标注默认会把完整 task、generated_patch、canonical steps 发给模型；`--compact-model-input` 只适合低成本调试。

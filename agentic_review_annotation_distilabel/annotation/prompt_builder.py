@@ -5,10 +5,11 @@ from pathlib import Path
 from typing import Any
 
 from agentic_review_annotation_distilabel.adapters.base import Sample
+from agentic_review_annotation_distilabel.annotation.annotators import ANNOTATION_AGENTS
 from agentic_review_annotation_distilabel.annotation.schema import annotation_json_schema
 from agentic_review_annotation_distilabel.steps.base import CanonicalStep
 
-PROMPT_VERSION = "annotation_v1"
+PROMPT_VERSION = "annotation_v2_specialized"
 DEFAULT_PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "annotation_v1.md"
 
 
@@ -41,6 +42,34 @@ class PromptBuilder:
             json.dumps(annotation_json_schema(), ensure_ascii=False, indent=2),
         )
 
+    def build_annotator_instructions(
+        self,
+        sample: Sample,
+        steps: list[CanonicalStep],
+    ) -> dict[str, str]:
+        return {
+            agent.name: agent.build_instruction(
+                self.build_specialized_payload(
+                    sample,
+                    steps,
+                    include_evaluation=agent.include_evaluation,
+                )
+            )
+            for agent in ANNOTATION_AGENTS
+        }
+
+    def build_specialized_payload(
+        self,
+        sample: Sample,
+        steps: list[CanonicalStep],
+        *,
+        include_evaluation: bool,
+    ) -> dict[str, Any]:
+        payload = self.build_model_payload(sample, steps)
+        if not include_evaluation:
+            payload.pop("evaluation", None)
+        return payload
+
     def build_payload(self, sample: Sample, steps: list[CanonicalStep]) -> dict[str, Any]:
         return {
             "instance_id": sample.instance_id,
@@ -48,14 +77,8 @@ class PromptBuilder:
             "environment": sample.environment,
             "task": sample.task,
             "evaluation": sample.evaluation,
-            "patch": sample.patch,
-            "canonical_steps": [
-                {
-                    "step_id": step.step_id,
-                    "content": step.content,
-                }
-                for step in steps
-            ],
+            "generated_patch": sample.patch,
+            "canonical_steps": [step.to_dict() for step in steps],
         }
 
     def build_model_payload(self, sample: Sample, steps: list[CanonicalStep]) -> dict[str, Any]:
@@ -82,7 +105,9 @@ class PromptBuilder:
                 }
                 step_text = json.dumps(compact_content, ensure_ascii=False)
 
-            compact_steps.append({"step_id": step.step_id, "content": compact_content})
+            compact_step = step.to_dict()
+            compact_step["content"] = compact_content
+            compact_steps.append(compact_step)
             used_step_chars += len(step_text)
 
         return {
@@ -91,11 +116,11 @@ class PromptBuilder:
             "environment": truncate_data(sample.environment, 4000),
             "task": truncate_data(sample.task, self.max_task_chars),
             "evaluation": sample.evaluation,
-            "patch": truncate_text(sample.patch or "", self.max_patch_chars),
+            "generated_patch": truncate_text(sample.patch or "", self.max_patch_chars),
             "canonical_steps": compact_steps,
             "model_input_note": (
-                "This is a compact model payload. Full task, patch, raw trajectory, "
-                "and full canonical steps are saved in data/normalized for human audit."
+                "This is a compact model payload. Full task, generated patch, raw trajectory, "
+                "and full canonical steps are saved in output/*/normalized for human audit."
             ),
         }
 

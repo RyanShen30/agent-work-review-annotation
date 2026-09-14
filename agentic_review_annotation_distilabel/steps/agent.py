@@ -12,4 +12,11 @@ class AgentStepParser(StepParser):
             raise ValueError("Agent trajectory must be a non-empty list.")
         if not all(isinstance(item, Mapping) for item in sample.trajectory):
             raise ValueError("Agent trajectory items must be JSON objects.")
-        return [CanonicalStep(step_id=index, content=dict(item)) for index, item in enumerate(sample.trajectory)]
+        return [
+            CanonicalStep(
+                step_id=index + 1,
+                content=dict(item),
+                raw_message_indices=[index],
+            )
+            for index, item in enumerate(sample.trajectory)
+        ]

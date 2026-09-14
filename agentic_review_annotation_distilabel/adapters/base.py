@@ -14,6 +14,9 @@ class Sample:
     raw: Mapping[str, Any]
     repository: Any | None = None
     environment: Any | None = None
+    source: dict[str, Any] | None = None
+    run: dict[str, Any] | None = None
+    oracle: dict[str, Any] | None = None
 
 
 class DatasetAdapter:

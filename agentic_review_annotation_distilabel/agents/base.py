@@ -32,6 +32,7 @@ class AgentConfig(BaseModel):
     output_dir: Path = PROJECT_ROOT / "output" / "traj"
     model_kwargs: dict[str, Any] = Field(default_factory=dict)
     environment_kwargs: dict[str, Any] = Field(default_factory=dict)
+    benchmark_instance: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def require_docker_image(self) -> "AgentConfig":

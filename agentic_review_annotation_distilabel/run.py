@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -17,7 +18,14 @@ from agentic_review_annotation_distilabel.annotation.prompt_builder import (
     PROMPT_VERSION,
     PromptBuilder,
 )
+from agentic_review_annotation_distilabel.annotation.exporter import (
+    export_master,
+    export_private,
+    export_public,
+)
 from agentic_review_annotation_distilabel.annotation.schema import (
+    AnnotationResult,
+    MasterRecord,
     annotation_to_dict,
     annotation_json_schema,
     parse_annotation,
@@ -37,6 +45,8 @@ DEFAULT_INPUT = Path("annotation/samples")
 DEFAULT_NORMALIZED_DIR = Path("output/annotation/normalized")
 DEFAULT_NORMALIZED_PREVIEW_DIR = Path("output/annotation/preview")
 DEFAULT_OUTPUT_DIR = Path("output/annotation/annotation")
+DEFAULT_PUBLIC_DIR = Path("output/annotation/public")
+DEFAULT_PRIVATE_DIR = Path("output/annotation/private")
 DEFAULT_CACHE_DIR = Path("output/annotation/cache")
 
 ADAPTERS = {
@@ -59,7 +69,9 @@ def main() -> None:
     paths = config.get("paths") if isinstance(config.get("paths"), dict) else {}
     model_config = config.get("model") if isinstance(config.get("model"), dict) else {}
 
-    input_path = args.input or Path(config.get("input", paths.get("input", DEFAULT_INPUT)))
+    input_path = args.input or Path(
+        config.get("input", paths.get("input", DEFAULT_INPUT))
+    )
     normalized_dir = args.normalized_dir or Path(
         paths.get("normalized_dir", DEFAULT_NORMALIZED_DIR)
     )
@@ -67,6 +79,8 @@ def main() -> None:
         paths.get("normalized_preview_dir", DEFAULT_NORMALIZED_PREVIEW_DIR)
     )
     output_dir = args.output_dir or Path(paths.get("output_dir", DEFAULT_OUTPUT_DIR))
+    public_dir = args.public_dir or Path(paths.get("public_dir", DEFAULT_PUBLIC_DIR))
+    private_dir = args.private_dir or Path(paths.get("private_dir", DEFAULT_PRIVATE_DIR))
     cache_dir = args.cache_dir or Path(paths.get("cache_dir", DEFAULT_CACHE_DIR))
 
     runner = args.runner or config.get("runner") or "llm"
@@ -74,14 +88,20 @@ def main() -> None:
 
     max_retries = int(model_config.get("max_retries", 2))
 
-    max_new_tokens = args.model_max_new_tokens or int(model_config.get("max_new_tokens", 4096))
+    max_new_tokens = args.model_max_new_tokens or int(
+        model_config.get("max_new_tokens", 4096)
+    )
 
     prompt_budget = config.get("prompt_budget", {})
     prompt_builder = PromptBuilder(
-        compact_for_model=args.compact_model_input or bool(prompt_budget.get("compact_for_model", False)),
-        max_task_chars=args.max_task_chars or int(prompt_budget.get("max_task_chars", 12000)),
-        max_patch_chars=args.max_patch_chars or int(prompt_budget.get("max_patch_chars", 20000)),
-        max_step_chars=args.max_step_chars or int(prompt_budget.get("max_step_chars", 6000)),
+        compact_for_model=args.compact_model_input
+        or bool(prompt_budget.get("compact_for_model", False)),
+        max_task_chars=args.max_task_chars
+        or int(prompt_budget.get("max_task_chars", 12000)),
+        max_patch_chars=args.max_patch_chars
+        or int(prompt_budget.get("max_patch_chars", 20000)),
+        max_step_chars=args.max_step_chars
+        or int(prompt_budget.get("max_step_chars", 6000)),
         max_total_step_chars=args.max_total_step_chars
         or int(prompt_budget.get("max_total_step_chars", 60000)),
     )
@@ -91,6 +111,8 @@ def main() -> None:
         normalized_dir=normalized_dir,
         normalized_preview_dir=normalized_preview_dir,
         output_dir=output_dir,
+        public_dir=public_dir,
+        private_dir=private_dir,
         dataset=dataset,
         limit=args.limit,
         start_index=args.start_index,
@@ -133,10 +155,17 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run Distilabel auto-annotation for agentic work review."
     )
-    parser.add_argument("--input", type=Path, default=None, help="Input JSON file or directory.")
+    parser.add_argument(
+        "--input",
+        type=Path,
+        default=None,
+        help="Input JSON file or directory.",
+    )
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--normalized-dir", type=Path, default=None)
     parser.add_argument("--normalized-preview-dir", type=Path, default=None)
+    parser.add_argument("--public-dir", type=Path, default=None)
+    parser.add_argument("--private-dir", type=Path, default=None)
     parser.add_argument("--cache-dir", type=Path, default=None)
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--dataset", choices=sorted(ADAPTERS), default=None)
@@ -174,6 +203,8 @@ def prepare_rows(
     normalized_dir: Path,
     normalized_preview_dir: Path,
     output_dir: Path,
+    public_dir: Path,
+    private_dir: Path,
     dataset: str,
     limit: int | None,
     start_index: int,
@@ -191,11 +222,14 @@ def prepare_rows(
     normalized_dir.mkdir(parents=True, exist_ok=True)
     normalized_preview_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
+    public_dir.mkdir(parents=True, exist_ok=True)
+    private_dir.mkdir(parents=True, exist_ok=True)
 
     rows: list[dict[str, Any]] = []
     skipped = 0
     for path in input_paths:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw_text = path.read_text(encoding="utf-8")
+        raw = json.loads(raw_text)
         sample = adapter.adapt(raw)
         steps = step_parser.parse(sample)
         valid_step_ids = [step.step_id for step in steps]
@@ -209,16 +243,23 @@ def prepare_rows(
             "repository": normalized.get("repository"),
             "environment": normalized.get("environment"),
             "task": normalized["task"],
-            "trajectory": sample.trajectory,
-            "patch": normalized["patch"],
+            "generated_patch": normalized["generated_patch"],
             "evaluation": normalized["evaluation"],
             "canonical_steps": normalized["canonical_steps"],
         }
-        normalized_path = normalized_dir / f"{sample.instance_id}.json"
-        normalized_path.write_text(
-            json.dumps(normalized, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
+        master = build_master_record(
+            sample=sample,
+            dataset=dataset,
+            canonical_steps=normalized["canonical_steps"],
+            source_path=path,
+            source_sha256=sha256_text(raw_text),
         )
+        normalized_path = normalized_dir / f"{sample.instance_id}.json"
+        public_path = public_dir / f"{sample.instance_id}.json"
+        private_path = private_dir / f"{sample.instance_id}.json"
+        write_record(normalized_path, export_master(master))
+        write_record(public_path, export_public(master))
+        write_record(private_path, export_private(master))
         normalized_preview_path = normalized_preview_dir / f"{sample.instance_id}.json"
         normalized_preview_path.write_text(
             json.dumps(build_normalized_preview(normalized), ensure_ascii=False, indent=2)
@@ -232,6 +273,16 @@ def prepare_rows(
             sample.instance_id,
             valid_step_ids,
         ):
+            annotation, metadata = load_existing_annotation(output_path)
+            master = master_with_auto_annotation(
+                master=master,
+                annotation=annotation,
+                model=metadata.get("model"),
+                prompt_version=metadata.get("prompt_version") or PROMPT_VERSION,
+            )
+            write_record(normalized_path, export_master(master))
+            write_record(public_path, export_public(master))
+            write_record(private_path, export_private(master))
             print(f"skip existing: {output_path}")
             skipped += 1
             continue
@@ -240,6 +291,10 @@ def prepare_rows(
             {
                 "instance_id": sample.instance_id,
                 "instruction": prompt_builder.build_instruction(sample, steps),
+                "annotator_instructions": prompt_builder.build_annotator_instructions(
+                    sample,
+                    steps,
+                ),
                 "structured_output": {
                     "format": "json",
                     "schema": annotation_json_schema(),
@@ -248,13 +303,17 @@ def prepare_rows(
                 "task": sample.task,
                 "repository": sample.repository,
                 "environment": sample.environment,
-                "patch": sample.patch,
+                "generated_patch": sample.patch,
                 "evaluation": sample.evaluation,
                 "trajectory": sample.trajectory,
                 "canonical_steps": normalized["canonical_steps"],
                 "valid_step_ids": valid_step_ids,
                 "prompt_version": PROMPT_VERSION,
                 "source_path": str(path),
+                "master_record": export_master(master),
+                "master_path": str(normalized_path),
+                "public_path": str(public_path),
+                "private_path": str(private_path),
             }
         )
 
@@ -272,12 +331,106 @@ def build_normalized_preview(normalized: dict[str, Any]) -> dict[str, Any]:
         "repository": normalized.get("repository"),
         "environment_preview": preview_text(normalized.get("environment"), max_chars=2000),
         "task_preview": preview_task(normalized.get("task")),
-        "patch_preview": preview_text(normalized.get("patch"), max_chars=3000),
+        "generated_patch_preview": preview_text(
+            normalized.get("generated_patch"),
+            max_chars=3000,
+        ),
         "evaluation": normalized.get("evaluation"),
         "canonical_steps_preview": [
             preview_step(step) for step in normalized.get("canonical_steps", [])
         ],
     }
+
+
+def build_master_record(
+    *,
+    sample: Any,
+    dataset: str,
+    canonical_steps: list[dict[str, Any]],
+    source_path: Path,
+    source_sha256: str,
+) -> MasterRecord:
+    source = sample.source or {}
+    if not source.get("problem_statement") and sample.task is not None:
+        source = {**source, "problem_statement": sample.task}
+    if not source.get("repo") and sample.repository:
+        repository = sample.repository if isinstance(sample.repository, dict) else {}
+        source = {**source, "repo": repository.get("repo") or repository.get("repository")}
+    if not source.get("benchmark"):
+        source = {**source, "benchmark": dataset}
+
+    run = {
+        "harness": dataset,
+        "environment": sample.environment or {},
+        "generated_patch": sample.patch,
+        **(sample.run or {}),
+    }
+    evaluation = build_master_evaluation(sample.evaluation)
+    return MasterRecord.model_validate(
+        {
+            "instance_id": sample.instance_id,
+            "source": source,
+            "run": run,
+            "trajectory": {
+                "raw_path": str(source_path),
+                "raw_sha256": source_sha256,
+                "canonical_steps": canonical_steps,
+            },
+            "evaluation": evaluation,
+            "oracle": sample.oracle or {},
+            "annotation": {"auto": {"step_reviews": []}, "final": None},
+            "provenance": {
+                "source_path": str(source_path),
+                "source_sha256": source_sha256,
+                "created_by_pipeline": "agentic_review_annotation_distilabel",
+            },
+        }
+    )
+
+
+def build_master_evaluation(evaluation: Any) -> dict[str, Any]:
+    if not isinstance(evaluation, dict):
+        return {}
+    per_test_results = evaluation.get("per_test_results") or evaluation.get("tests") or []
+    if not isinstance(per_test_results, list):
+        per_test_results = []
+    return {
+        key: value
+        for key, value in {
+            "resolved": evaluation.get("resolved"),
+            "per_test_results": per_test_results,
+            "eval_logs": evaluation.get("eval_logs"),
+        }.items()
+        if value not in (None, [], {})
+    }
+
+
+def master_with_auto_annotation(
+    *,
+    master: MasterRecord | dict[str, Any],
+    annotation: AnnotationResult,
+    model: str | None,
+    prompt_version: str | None,
+) -> MasterRecord:
+    payload = export_master(master)
+    payload["annotation"]["auto"] = {
+        "model": model,
+        "prompt_version": prompt_version,
+        "step_reviews": annotation_to_dict(annotation)["step_reviews"],
+    }
+    return MasterRecord.model_validate(payload)
+
+
+def write_record(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def preview_task(task: Any) -> Any:
@@ -384,29 +537,38 @@ def collect_input_paths(path: Path, dataset: str | None = None) -> list[Path]:
         return [path]
     if not path.exists():
         raise FileNotFoundError(path)
-    paths = sorted(child for child in path.iterdir() if child.suffix == ".json" and child.is_file())
+    paths = sorted(
+        child for child in path.iterdir() if child.suffix == ".json" and child.is_file()
+    )
     if dataset:
         paths = [
             child
             for child in paths
-            if json.loads(child.read_text(encoding="utf-8")).get("harness") in (None, dataset)
+            if json.loads(child.read_text(encoding="utf-8")).get("harness")
+            in (None, dataset)
         ]
     return paths
 
 
 def is_valid_existing_result(path: Path, instance_id: str, valid_step_ids: list[int]) -> bool:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        annotation = parse_annotation(
-            {
-                "instance_id": payload["instance_id"],
-                "step_reviews": payload.get("step_reviews", []),
-            }
-        )
+        annotation, _ = load_existing_annotation(path)
         validate_annotation_against_steps(annotation, instance_id, valid_step_ids)
         return True
     except Exception:
         return False
+
+
+def load_existing_annotation(path: Path) -> tuple[AnnotationResult, dict[str, Any]]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    annotation = parse_annotation(
+        {
+            "instance_id": payload["instance_id"],
+            "step_reviews": payload.get("step_reviews", []),
+        }
+    )
+    metadata = payload.get("metadata")
+    return annotation, metadata if isinstance(metadata, dict) else {}
 
 
 def save_annotation_outputs(
@@ -449,6 +611,9 @@ def save_annotation_outputs(
                 "model": row.get("model_name") or model,
                 "prompt_version": row.get("prompt_version") or PROMPT_VERSION,
                 "source_path": row.get("source_path"),
+                "annotation_agents": sorted(
+                    (row.get("annotator_generations") or {}).keys()
+                ),
             },
         }
         output_path = output_dir / f"{annotation.instance_id}.json"
@@ -456,6 +621,16 @@ def save_annotation_outputs(
             json.dumps(result, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+        if row.get("master_record"):
+            master = master_with_auto_annotation(
+                master=row["master_record"],
+                annotation=annotation,
+                model=result["metadata"]["model"],
+                prompt_version=result["metadata"]["prompt_version"],
+            )
+            write_record(Path(str(row["master_path"])), export_master(master))
+            write_record(Path(str(row["public_path"])), export_public(master))
+            write_record(Path(str(row["private_path"])), export_private(master))
         saved += 1
 
     if failures:

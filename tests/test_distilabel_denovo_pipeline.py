@@ -35,7 +35,6 @@ class DistilabelDeNovoPipelineTests(unittest.TestCase):
                         "task_completion_quality": {
                             "rating": "unknown",
                             "reason": "The inline fixture does not include enough evidence.",
-                            "recovery": "unknown",
                         },
                         "safety_privacy": {
                             "rating": "unknown",
@@ -57,7 +56,7 @@ class DistilabelDeNovoPipelineTests(unittest.TestCase):
 
         self.assertEqual(sample.instance_id, "inline_denovo_sample")
         self.assertEqual(len(steps), 2)
-        self.assertEqual(steps[0].step_id, 0)
+        self.assertEqual(steps[0].step_id, 1)
         self.assertIn("action", steps[0].content)
         self.assertEqual(sample.task, raw["initial_messages"])
         self.assertIn("Review payload", prompt)
