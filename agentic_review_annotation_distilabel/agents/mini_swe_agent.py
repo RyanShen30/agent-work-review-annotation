@@ -81,6 +81,7 @@ class MiniSWEAgent(Agent):
                     "problem": problem,
                     "patch": self._patch(),
                     "outcome": outcome,
+                    "swebench": self.config.benchmark_instance,
                 }
             )
             result["output_path"] = str(self.save(problem, result))

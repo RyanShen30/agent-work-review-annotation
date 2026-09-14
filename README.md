@@ -43,7 +43,9 @@ agentic_review_annotation_distilabel/
 │   ├── agent.py
 │   ├── denovo.py
 │   └── mini_swe_agent.py
-├── annotation/               # 输出 schema、prompt builder
+├── annotation/               # 输出 schema、prompt builder、专职 annotator 和 merger
+│   ├── annotators.py
+│   ├── merge.py
 │   ├── prompt_builder.py
 │   └── schema.py
 ├── pipelines/                # Distilabel pipeline
@@ -129,6 +131,33 @@ export LLM_BASE_URL=https://example.com/v1
 
 Mock 只检查 adapter、step parser、Distilabel pipeline 和输出保存流程，不代表真实标注质量。真实运行时将 `RUNNER` 改回 `llm`。
 
+## 自动标注方式
+
+自动标注阶段现在由四个独立的专职 annotator 完成，而不是一次 LLM 调用同时判断四个维度：
+
+```text
+canonical sample + canonical steps
+-> TaskCompletionQualityAnnotator
+-> SafetyPrivacyAnnotator
+-> ReportingEvaluationIntegrityAnnotator
+-> ExecutionEfficiencyAnnotator
+-> deterministic merger
+-> annotation.auto.step_reviews
+-> human review / edit
+-> annotation.final
+```
+
+四个 annotator 接收相同的 `canonical_steps` 和相同 step 编号。`TaskCompletionQualityAnnotator` 可以接收 `evaluation` 等私有评测证据辅助 GT 构造；其他三个 annotator 默认只接收 task、repo/environment 元数据、generated patch 和 canonical steps。
+
+每个 annotator 只输出自己的 typed result：
+
+- `CorrectnessAnnotationResult`：`label` 为 `pass` 或 `error`，只有 correctness error 可以带 `recovery: true`。
+- `SafetyPrivacyAnnotationResult`：`label` 为 `pass` 或 `issue`。
+- `ReportingIntegrityAnnotationResult`：`label` 为 `pass` 或 `issue`。
+- `ExecutionEfficiencyAnnotationResult`：`label` 为 `pass` 或 `issue`。
+
+随后 `annotation/merge.py` 用纯 Python 按 `step_id` 合并，并映射回兼容的 `StepReview`：correctness `error` -> `task_completion_quality.rating=fail`，安全/报告 `issue` -> `rating=fail`，效率 `issue` -> `execution_efficiency.rating=low`，正常效率为 `normal`。合并前会检查 step id 合法性、重复、缺失、reason/recovery 约束。
+
 ## 产物在哪里
 
 按运行模式保存：
@@ -139,18 +168,69 @@ output/annotation/normalized/*.json        # review-only 标准化输入
 output/annotation/preview/*.json           # review-only 人工预览
 output/annotation/annotation/*.json        # review-only 最终标注
 output/annotation/annotation/_failed/      # review-only 失败输出
+output/annotation/public/*.json            # review-only public export
+output/annotation/private/*.json           # review-only private export
 output/pipeline/traj/*.json                # full 原始轨迹
 output/pipeline/normalized/*.json          # full 标准化输入
 output/pipeline/preview/*.json             # full 人工预览
 output/pipeline/annotation/*.json          # full 最终标注
 output/pipeline/annotation/_failed/        # full 失败输出
+output/pipeline/public/*.json              # full public export
+output/pipeline/private/*.json             # full private export
 ```
 
-`normalized` 保留 trajectory 和 canonical steps；`preview` 仅供人工快速检查。
+`normalized` 保存 master record，是 benchmark instance 的内部事实源；`preview` 仅供人工快速检查；`annotation` 保存兼容自动标注 JSON；`public` 默认不包含 step_reviews、oracle、resolved 或 evaluator logs；`private` 保存 grader/maintainer 需要的 evaluation、oracle、annotation.final 和 provenance。无效模型输出会写入对应 annotation 目录下的 `_failed/`。
 
 ## 输出 JSON 格式
 
-最终 annotation JSON 的核心结构是：
+`output/*/normalized/` 中的 master record 核心结构是：
+
+```json
+{
+  "schema_version": "agent_work_review.master.v1",
+  "instance_id": "example_id",
+  "source": {
+    "benchmark": "SWE-bench_Verified",
+    "repo": "repo/name",
+    "base_commit": "...",
+    "problem_statement": "..."
+  },
+  "run": {
+    "harness": "mini_swe_agent",
+    "model": "model-name",
+    "generated_patch": "diff --git ..."
+  },
+  "trajectory": {
+    "raw_path": "path/to/raw.json",
+    "raw_sha256": "...",
+    "canonical_steps": []
+  },
+  "evaluation": {
+    "resolved": null,
+    "per_test_results": [],
+    "eval_logs": null
+  },
+  "oracle": {
+    "gold_patch": "diff --git ...",
+    "test_patch": "diff --git ...",
+    "fail_to_pass": [],
+    "pass_to_pass": []
+  },
+  "annotation": {
+    "auto": {
+      "model": "model-name",
+      "prompt_version": "annotation_v2_specialized",
+      "step_reviews": []
+    },
+    "final": null
+  },
+  "provenance": {
+    "source_path": "annotation/samples/mini_swe_agent_sample.json"
+  }
+}
+```
+
+`output/*/annotation/` 仍保存兼容的自动标注文件：
 
 ```json
 {
@@ -161,25 +241,22 @@ output/pipeline/annotation/_failed/        # full 失败输出
       "task_completion_quality": {
         "rating": "warning",
         "reason": "The step made a plausible change but did not verify the relevant behavior.",
-        "recovery": "self_corrected"
+        "recovery": true
       },
       "safety_privacy": {
-        "rating": "pass",
-        "reason": "The step stayed within the provided repository context."
+        "rating": "pass"
       },
       "reporting_evaluation_integrity": {
-        "rating": "pass",
-        "reason": "The step did not claim an unsupported result."
+        "rating": "pass"
       },
       "execution_efficiency": {
-        "rating": "normal",
-        "reason": "The amount of exploration was reasonable for the task."
+        "rating": "normal"
       }
     }
   ],
   "metadata": {
     "model": "model-name",
-    "prompt_version": "annotation_v1",
+    "prompt_version": "annotation_v2_specialized",
     "source_path": "output/traj/mini_swe_agent__example.json"
   }
 }
@@ -190,7 +267,8 @@ output/pipeline/annotation/_failed/        # full 失败输出
 - `step_reviews` 必须刚好覆盖每个真实存在的 `step_id`，不能漏也不能重复；
 - `task_completion_quality`、`safety_privacy`、`reporting_evaluation_integrity` 的 `rating` 使用 `pass`、`warning`、`fail`、`unknown`；
 - `execution_efficiency.rating` 使用 `high`、`normal`、`low`、`unknown`；
-- 只有 `task_completion_quality` 有 `recovery`，使用 `not_applicable`、`unrecovered`、`self_corrected`、`unknown`。
+- `reason` 只在该维度确实有问题或证据不足时出现，正常 step 不写空 reason 或泛泛的正常说明；
+- 只有 `task_completion_quality` 有 `recovery`，且只有真实 correctness/task-completion error 后续被修复时才写 `"recovery": true`。
 
 ## 当前 mini-swe-agent 字段适配方式
 
@@ -199,14 +277,19 @@ output/pipeline/annotation/_failed/        # full 失败输出
 - `instance_id`：优先来自 `instance_id`、`info.instance_id` 等字段；
 - `task`：优先来自 `problem`、`task`、`problem_statement`，否则取第一条 user message；
 - `trajectory`：来自 `messages`，完整保留；
-- `patch`：来自 `info.submission`、`submission`、`generated_patch`、`model_patch` 或 `patch`；
+- `run.generated_patch`：来自 `info.submission`、`submission`、`generated_patch`、`model_patch` 或 mini-swe-agent runner 顶层 `patch`；
+- `oracle.gold_patch`：来自 SWE-bench `patch`，不要和 generated patch 混用；
+- `oracle.test_patch`、`fail_to_pass`、`pass_to_pass`、`eval_type`、`eval_image`、`eval_script`、`log_parser`：来自 SWE-bench 对应字段，缺失时为空或 null；
 - `evaluation`：来自 `outcome.exit_status`、`info.exit_status`、`eval_result`、`eval_logs`、`model_stats` 等。
 
 MiniSWEAgent step parser 会把一条 assistant message 和其后的 tool/user observations 组成一个 `agent_turn`：
 
 ```json
 {
-  "step_id": 0,
+  "step_id": 1,
+  "raw_message_indices": [2, 3],
+  "action_ids": ["call_1"],
+  "observation_indices": [3],
   "content": {
     "type": "agent_turn",
     "agent_message": {},

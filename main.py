@@ -56,6 +56,8 @@ def main() -> None:
             "--output-dir", str(base / "annotation"),
             "--normalized-dir", str(base / "normalized"),
             "--normalized-preview-dir", str(base / "preview"),
+            "--public-dir", str(base / "public"),
+            "--private-dir", str(base / "private"),
             "--cache-dir", str(base / "cache"),
         ]
         if mode == "full":

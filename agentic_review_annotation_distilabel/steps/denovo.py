@@ -31,7 +31,13 @@ class DeNovoSWEStepParser(StepParser):
                 )
 
             seen.add(raw_step_id)
-            steps.append(CanonicalStep(step_id=raw_step_id, content=dict(raw_step)))
+            steps.append(
+                CanonicalStep(
+                    step_id=index + 1,
+                    content=dict(raw_step),
+                    raw_message_indices=[index],
+                )
+            )
 
         if not steps:
             raise ValueError("Trajectory must contain at least one step.")

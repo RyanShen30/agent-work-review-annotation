@@ -32,12 +32,19 @@ def main() -> None:
         config.output_dir = args.output_dir
     if not config.api_key:
         parser.error("export LLM_API_KEY before running")
-    instances = load_instances(config.benchmark_path, config.instance) if config.benchmark_path else [None]
+    instances = (
+        load_instances(config.benchmark_path, config.instance)
+        if config.benchmark_path
+        else [None]
+    )
     for instance in instances:
         if instance:
             config.instance_id = str(instance["instance_id"])
             config.base_commit = instance.get("base_commit")
-            config.docker_image = instance.get("image") or swebench_image(instance)
+            config.docker_image = (
+                config.docker_image or instance.get("image") or swebench_image(instance)
+            )
+            config.benchmark_instance = instance
         problem = args.problem or (instance and instance.get("problem_statement"))
         if not problem:
             parser.error("provide --problem or benchmark_path in YAML")

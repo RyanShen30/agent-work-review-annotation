@@ -43,6 +43,8 @@ class MiniSWEAgentStepParser(StepParser):
                 seen_agent_turn = True
                 step_messages = [message]
                 observations: list[dict[str, Any]] = []
+                raw_message_indices = [index]
+                observation_indices: list[int] = []
                 index += 1
                 while index < len(messages):
                     next_message = messages[index]
@@ -51,18 +53,25 @@ class MiniSWEAgentStepParser(StepParser):
                         break
                     if next_role in self.observation_roles:
                         observations.append(next_message)
+                        observation_indices.append(index)
                     else:
                         observations.append(next_message)
+                        observation_indices.append(index)
                     step_messages.append(next_message)
+                    raw_message_indices.append(index)
                     index += 1
 
+                actions = _extract_actions(message)
                 steps.append(
                     CanonicalStep(
-                        step_id=len(steps),
+                        step_id=len(steps) + 1,
+                        raw_message_indices=raw_message_indices,
+                        action_ids=_extract_action_ids(actions),
+                        observation_indices=observation_indices,
                         content={
                             "type": "agent_turn",
                             "agent_message": message,
-                            "actions": _extract_actions(message),
+                            "actions": actions,
                             "observations": observations,
                             "messages": step_messages,
                         },
@@ -96,3 +105,18 @@ def _extract_actions(message: Mapping[str, Any]) -> list[Any]:
         actions.extend(tool_calls)
 
     return actions
+
+
+def _extract_action_ids(actions: list[Any]) -> list[str]:
+    action_ids: list[str] = []
+    for index, action in enumerate(actions, start=1):
+        if isinstance(action, Mapping):
+            action_id = action.get("id") or action.get("tool_call_id") or action.get("name")
+            function = action.get("function")
+            if action_id is None and isinstance(function, Mapping):
+                action_id = function.get("name")
+            if action_id is not None:
+                action_ids.append(str(action_id))
+                continue
+        action_ids.append(str(index))
+    return action_ids

@@ -53,7 +53,7 @@ def test_adapts_saved_trajectory(adapter, raw, trajectory_key):
     assert sample.task == "fix it"
     assert sample.trajectory == raw[trajectory_key]
     assert sample.patch == raw["patch"]
-    assert steps[0].step_id == 0
+    assert steps[0].step_id == 1
 
 
 def test_mini_swe_agent_adapter_drops_raw_response_but_keeps_actions():
@@ -106,6 +106,10 @@ def test_mini_swe_agent_adapter_feeds_dedicated_step_parser():
     assert sample.evaluation["exit_status"] == "Submitted"
     assert sample.repository == {"instance_id": "django__django-11049", "cwd": "/workspace/django"}
     assert len(steps) == 2
+    assert steps[0].step_id == 1
+    assert steps[0].raw_message_indices == [2, 3]
+    assert steps[0].action_ids == ["bash"]
+    assert steps[0].observation_indices == [3]
     assert steps[0].content["type"] == "agent_turn"
     assert steps[0].content["actions"] == [{"function": {"name": "bash", "arguments": "pytest"}}]
     assert steps[0].content["observations"] == [{"role": "tool", "content": "1 failed"}]
@@ -127,3 +131,53 @@ def test_directory_input_filters_other_harnesses(tmp_path):
     openhands.write_text(json.dumps({"harness": "openhands"}))
 
     assert collect_input_paths(tmp_path, "mini_swe_agent") == [mini]
+
+
+def test_mini_swe_agent_preserves_swebench_oracle_separately():
+    raw = {
+        "instance_id": "astropy__astropy-14365",
+        "repo": "astropy/astropy",
+        "base_commit": "abc123",
+        "problem_statement": "Fix QDP parsing.",
+        "hints_text": "Commands are case-insensitive.",
+        "created_at": "2023-01-01T00:00:00Z",
+        "version": "1.0",
+        "difficulty": "medium",
+        "patch": "gold patch",
+        "test_patch": "test patch",
+        "FAIL_TO_PASS": '["test_qdp_lowercase"]',
+        "PASS_TO_PASS": ["test_existing"],
+        "eval_type": "pytest",
+        "image": "swebench/image:latest",
+        "log_parser": "parse_pytest",
+        "eval_script": "pytest",
+        "generated_patch": "agent patch",
+        "messages": [
+            {"role": "user", "content": "Fix QDP parsing."},
+            {"role": "assistant", "content": "Done."},
+        ],
+    }
+
+    sample = MiniSWEAgentAdapter().adapt(raw)
+
+    assert sample.patch == "agent patch"
+    assert sample.source == {
+        "benchmark": "SWE-bench_Verified",
+        "repo": "astropy/astropy",
+        "base_commit": "abc123",
+        "problem_statement": "Fix QDP parsing.",
+        "hints_text": "Commands are case-insensitive.",
+        "created_at": "2023-01-01T00:00:00Z",
+        "version": "1.0",
+        "difficulty": "medium",
+    }
+    assert sample.oracle == {
+        "gold_patch": "gold patch",
+        "test_patch": "test patch",
+        "fail_to_pass": ["test_qdp_lowercase"],
+        "pass_to_pass": ["test_existing"],
+        "eval_type": "pytest",
+        "eval_image": "swebench/image:latest",
+        "eval_script": "pytest",
+        "log_parser": "parse_pytest",
+    }
