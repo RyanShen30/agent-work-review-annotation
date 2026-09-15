@@ -33,9 +33,24 @@ def main() -> None:
     if mode in {"traj-only", "full"}:
         generation = config.get("generation", {})
         harness = generation.get("harness", "mini_swe_agent")
-        python = ROOT / "agentic_review_annotation_distilabel" / "thirdparty" / (
-            "mini-swe-agent" if harness == "mini_swe_agent" else "openhands"
-        ) / ".venv" / "bin" / "python"
+        thirdparty_names = {
+            "mini_swe_agent": "mini-swe-agent",
+            "openhands": "openhands",
+            "opencollab": "opencollab",
+        }
+        try:
+            thirdparty_name = thirdparty_names[harness]
+        except KeyError as exc:
+            raise ValueError(f"unsupported generation harness: {harness}") from exc
+        python = (
+            ROOT
+            / "agentic_review_annotation_distilabel"
+            / "thirdparty"
+            / thirdparty_name
+            / ".venv"
+            / "bin"
+            / "python"
+        )
         output_dir = ROOT / "output" / ("traj" if mode == "traj-only" else "pipeline/traj")
         command = [
             str(python), "-m", "agentic_review_annotation_distilabel.agents.run",

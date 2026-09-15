@@ -4,12 +4,14 @@ import pytest
 
 from agentic_review_annotation_distilabel.adapters import (
     MiniSWEAgentAdapter,
+    OpenCollabAdapter,
     OpenHandsAdapter,
 )
 from agentic_review_annotation_distilabel.run import collect_input_paths
 from agentic_review_annotation_distilabel.steps import (
     AgentStepParser,
     MiniSWEAgentStepParser,
+    OpenCollabStepParser,
 )
 
 
@@ -181,3 +183,181 @@ def test_mini_swe_agent_preserves_swebench_oracle_separately():
         "eval_script": "pytest",
         "log_parser": "parse_pytest",
     }
+
+
+def test_opencollab_adapter_preserves_trace_and_swebench_metadata():
+    raw = {
+        "harness": "opencollab",
+        "opencollab_version": "0.7.0",
+        "mode": "team",
+        "instance_id": "django__django-12345",
+        "problem": "Fix the regression.",
+        "model": "test-model",
+        "provider": "openai",
+        "generated_patch": "diff --git a/a.py b/a.py",
+        "status": "completed",
+        "tokens": 321,
+        "metrics": {"steps": 2, "sessions": 2},
+        "trajectory": [
+            {
+                "step": 1,
+                "type": "llm_call",
+                "payload": {"aid": 0, "role": "lead", "content": "Inspecting."},
+            }
+        ],
+        "swebench": {
+            "repo": "django/django",
+            "base_commit": "abc123",
+            "problem_statement": "Fix the regression.",
+            "patch": "gold patch",
+            "test_patch": "test patch",
+            "FAIL_TO_PASS": '["test_regression"]',
+            "PASS_TO_PASS": ["test_existing"],
+        },
+    }
+
+    sample = OpenCollabAdapter().adapt(raw)
+
+    assert sample.instance_id == "django__django-12345"
+    assert sample.task == "Fix the regression."
+    assert sample.patch == "diff --git a/a.py b/a.py"
+    assert sample.source == {
+        "benchmark": "SWE-bench",
+        "repo": "django/django",
+        "base_commit": "abc123",
+        "problem_statement": "Fix the regression.",
+    }
+    assert sample.run["harness"] == "opencollab"
+    assert sample.run["config"]["mode"] == "team"
+    assert sample.run["config"]["tokens"] == 321
+    assert sample.oracle == {
+        "gold_patch": "gold patch",
+        "test_patch": "test patch",
+        "fail_to_pass": ["test_regression"],
+        "pass_to_pass": ["test_existing"],
+    }
+
+
+def test_opencollab_step_parser_tracks_interleaved_agent_turns():
+    trace = [
+        {
+            "step": 1,
+            "type": "assigned.topology_nodes",
+            "payload": {"entry_role": "lead", "nodes": []},
+        },
+        {
+            "step": 2,
+            "type": "llm_call_started",
+            "payload": {"aid": 0, "role": "lead", "response_session_id": "lead-1"},
+        },
+        {
+            "step": 3,
+            "type": "context_shaping",
+            "payload": {"aid": 0, "rung": "none"},
+        },
+        {
+            "step": 4,
+            "type": "llm_call",
+            "payload": {
+                "aid": 0,
+                "role": "lead",
+                "session_step": 1,
+                "response_session_id": "lead-1",
+                "content": "I will inspect and delegate.",
+                "tool_calls": [
+                    {
+                        "id": "read-1",
+                        "name": "file_read",
+                        "arguments": '{"path":"a.py"}',
+                    },
+                    {"id": "spawn-1", "name": "spawn_agent", "arguments": "{}"},
+                ],
+            },
+        },
+        {
+            "step": 5,
+            "type": "tool_exec",
+            "payload": {
+                "aid": 0,
+                "tool": "file_read",
+                "tool_call_id": "read-1",
+                "result": "source",
+            },
+        },
+        {
+            "step": 6,
+            "type": "llm_call",
+            "payload": {
+                "aid": 1,
+                "role": "coder",
+                "session_step": 1,
+                "content": "I will edit it.",
+                "tool_calls": [
+                    {"id": "edit-1", "name": "apply_patch", "arguments": "{}"}
+                ],
+            },
+        },
+        {
+            "step": 7,
+            "type": "tool_exec",
+            "payload": {
+                "aid": 1,
+                "tool": "apply_patch",
+                "tool_call_id": "edit-1",
+                "result": "Done!",
+            },
+        },
+        {
+            "step": 8,
+            "type": "message_delivered",
+            "payload": {"from_aid": 1, "to_aid": 0, "summary": "implemented"},
+        },
+        {
+            "step": 9,
+            "type": "tool_exec",
+            "payload": {
+                "aid": 0,
+                "tool": "spawn_agent",
+                "tool_call_id": "spawn-1",
+                "result": "Agent 1 completed",
+            },
+        },
+    ]
+    sample = OpenCollabAdapter().adapt(
+        {"task_id": "task-1", "description": "Fix it.", "trajectory": trace}
+    )
+
+    steps = OpenCollabStepParser().parse(sample)
+
+    assert len(steps) == 2
+    assert steps[0].content["agent"] == {
+        "aid": 0,
+        "role": "lead",
+        "session_step": 1,
+    }
+    assert steps[0].action_ids == ["read-1", "spawn-1"]
+    assert steps[0].observation_indices == [4, 8]
+    assert [event["payload"]["tool"] for event in steps[0].content["observations"]] == [
+        "file_read",
+        "spawn_agent",
+    ]
+    assert steps[0].content["context_events"] == [trace[0]]
+    assert steps[0].content["runtime_events"] == [trace[1], trace[2]]
+    assert steps[1].content["agent"]["role"] == "coder"
+    assert steps[1].observation_indices == [6]
+    assert steps[1].content["orchestration_events"] == [trace[7]]
+
+
+def test_opencollab_adapter_accepts_embedded_jsonl():
+    trajectory = "\n".join(
+        json.dumps(record)
+        for record in [
+            {"type": "llm_call", "payload": {"aid": 0, "content": "Done"}},
+            {"type": "session_terminal", "payload": {"aid": 0, "phase": "done"}},
+        ]
+    )
+
+    sample = OpenCollabAdapter().adapt({"task_id": "jsonl-1", "trajectory": trajectory})
+
+    assert len(sample.trajectory) == 2
+    assert OpenCollabStepParser().parse(sample)[0].step_id == 1

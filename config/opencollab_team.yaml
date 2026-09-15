@@ -1,0 +1,33 @@
+entry: lead
+
+roles:
+  lead:
+    tools: [bash, file_read, apply_patch, grep, git_diff, spawn_agent, message_agent, team_status]
+    prompt: |
+      You are the lead developer. Diagnose the repository-level task, delegate
+      focused work when useful, integrate the final change, and verify it in the
+      entry workspace before reporting completion.
+
+  analyst:
+    tools: [bash, file_read, grep, message_agent]
+    prompt: |
+      Investigate the reported behavior and repository context. Send the lead a
+      concise root-cause analysis with relevant files, constraints, and risks.
+
+  coder:
+    tools: [bash, file_read, apply_patch, grep, git_diff, message_agent]
+    prompt: |
+      Implement the assigned change in your worktree, run focused checks, commit
+      the result, and send the lead the commit SHA with an honest test summary.
+
+  reviewer:
+    tools: [bash, file_read, grep, git_diff, message_agent]
+    prompt: |
+      Review the proposed implementation against the task and repository tests.
+      Report concrete correctness, safety, integrity, and efficiency concerns.
+
+topology:
+  lead: [analyst, coder, reviewer]
+  analyst: [lead, coder]
+  coder: [lead, reviewer]
+  reviewer: [lead, coder]

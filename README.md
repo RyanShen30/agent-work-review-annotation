@@ -2,14 +2,15 @@
 
 这个项目用于对于不同的coding agent问题使用不同的agent框架生成 的工作轨迹做自动预标注，产出结构化 JSON，之后供人工检查、修正，并沉淀成 GT。
 
-当前版本基于 Distilabel，默认处理 mini-swe-agent 生成的 trajectory，并可用 mini-swe-agent/OpenHands 在 SWE-bench Docker 环境中生成轨迹。OpenHands 的 runner 和 adapter 先保留在仓库里，这一轮主要维护 mini-swe-agent 到自动标注的链路。
+当前版本基于 Distilabel，默认处理 mini-swe-agent 生成的 trajectory，并可用 mini-swe-agent、OpenHands 或 OpenCollab 在 repository-level 任务上生成轨迹。
 
 ## 当前支持范围
 
-当前支持三种输入：
+当前支持四种输入：
 
 - mini-swe-agent `messages`，当前默认路径；
 - OpenHands `events`，暂保留；
+- OpenCollab `trajectory.jsonl`，使用专用多 agent step parser；
 - DeNovoSWE `trajectory`，仅保留兼容 adapter 和单元测试，不再提交原始样例数据。
 
 各 adapter 将原始结果转换为统一 `Sample`，再进入同一条标注 pipeline。
@@ -26,7 +27,7 @@
 -> 每条样本保存一个 annotation JSON
 ```
 
-Step 切分不由模型完成。DeNovoSWE 保留原 step 编号；mini-swe-agent 和 OpenHands 按消息或事件顺序生成 canonical steps。
+Step 切分不由模型完成。DeNovoSWE 保留原 step 编号；mini-swe-agent 按 assistant turn 切分；OpenHands 暂按事件切分；OpenCollab 以完成的 `llm_call` 为 step，并按 `aid` 归入工具结果和协作事件。
 
 ## 目录结构
 
@@ -36,13 +37,15 @@ agentic_review_annotation_distilabel/
 │   ├── base.py
 │   ├── denovo.py
 │   ├── mini_swe_agent.py
+│   ├── opencollab.py
 │   └── openhands.py
-├── agents/                   # 运行 mini-swe-agent / OpenHands
+├── agents/                   # 运行 mini-swe-agent / OpenHands / OpenCollab
 ├── steps/                    # trajectory -> canonical steps
 │   ├── base.py
 │   ├── agent.py
 │   ├── denovo.py
-│   └── mini_swe_agent.py
+│   ├── mini_swe_agent.py
+│   └── opencollab.py
 ├── annotation/               # 输出 schema、prompt builder、专职 annotator 和 merger
 │   ├── annotators.py
 │   ├── merge.py
@@ -55,9 +58,11 @@ agentic_review_annotation_distilabel/
 └── run.py
 
 config/
-└── example.yaml              # 完整配置示例，不需要修改
+├── example.yaml              # 完整配置示例
+└── opencollab_team.yaml      # repository-level coding team 示例
 scripts/
 ├── run_mini_swe_agent.sh     # traj-only 参数与入口
+├── run_opencollab.sh         # OpenCollab team/agent traj-only 入口
 ├── run_agent_work_review.sh  # review-only 参数与入口
 └── run_pipeline.sh           # full 参数与入口
 output/
@@ -84,7 +89,25 @@ python3 -m venv .venv
 
 之后运行命令时，推荐一直用 `.venv/bin/python`，这样不需要手动 `activate`。
 
-并且需要同时配置mini-swe-agent和openhand两个库对应的环境，分别在thirdparty的仓库目录下
+生成轨迹前，在选用的 `thirdparty` 子仓库中创建其 `.venv`。OpenCollab 使用官方 public SDK，当前 submodule 固定到 `v0.7.0` 对应提交。
+
+OpenCollab 默认运行 `team` 模式。将 `generation.harness` 与 `review.dataset` 都设为 `opencollab`，并按需配置：
+
+```yaml
+generation:
+  harness: opencollab
+  harness_kwargs:
+    mode: team
+    provider: openai
+    budget: 1000000
+    team_config: config/opencollab_team.yaml
+    use_worktrees: true
+
+review:
+  dataset: opencollab
+```
+
+若要做单 agent 对照，把 `mode` 改成 `agent`。runner 会把 OpenCollab 的 JSONL trace 和 team/agent manifest 嵌入统一的 trajectory JSON，再交给相同 review pipeline。
 
 ## 统一配置与运行
 
@@ -101,6 +124,7 @@ export LLM_BASE_URL=https://example.com/v1
 
 ```bash
 ./scripts/run_mini_swe_agent.sh     # traj-only
+./scripts/run_opencollab.sh         # OpenCollab traj-only
 ./scripts/run_agent_work_review.sh  # review-only
 ./scripts/run_pipeline.sh           # full
 ```
@@ -301,6 +325,10 @@ MiniSWEAgent step parser 会把一条 assistant message 和其后的 tool/user o
 ```
 
 这样 mini-swe-agent 的“跑轨迹”输出可以直接进入后续自动标注。
+
+## OpenCollab step 切分
+
+OpenCollab parser 把每条完成的 `llm_call` 作为一个 `opencollab_agent_turn`。同一 `aid` 后续产生的 `tool_exec` 会成为该 step 的 observation；`spawn*`、`message*`、`agent_*`、`worktree*` 等记录放入 `orchestration_events`；context shaping、terminal 和 retry 等放入 `runtime_events`。全局 topology 记录附在首个 step 的 `context_events`。这种切分允许不同 agent 并发交错，同时保留可审查的行动归属。
 
 ## 常用参数
 

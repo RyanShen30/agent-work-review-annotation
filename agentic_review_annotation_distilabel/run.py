@@ -12,6 +12,7 @@ import yaml
 from agentic_review_annotation_distilabel.adapters import (
     DeNovoSWEAdapter,
     MiniSWEAgentAdapter,
+    OpenCollabAdapter,
     OpenHandsAdapter,
 )
 from agentic_review_annotation_distilabel.annotation.prompt_builder import (
@@ -39,6 +40,7 @@ from agentic_review_annotation_distilabel.steps import (
     AgentStepParser,
     DeNovoSWEStepParser,
     MiniSWEAgentStepParser,
+    OpenCollabStepParser,
 )
 
 DEFAULT_INPUT = Path("annotation/samples")
@@ -53,12 +55,14 @@ ADAPTERS = {
     "denovo": DeNovoSWEAdapter,
     "mini_swe_agent": MiniSWEAgentAdapter,
     "openhands": OpenHandsAdapter,
+    "opencollab": OpenCollabAdapter,
 }
 
 STEP_PARSERS = {
     "denovo": DeNovoSWEStepParser,
     "mini_swe_agent": MiniSWEAgentStepParser,
     "openhands": AgentStepParser,
+    "opencollab": OpenCollabStepParser,
 }
 
 

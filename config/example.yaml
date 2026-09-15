@@ -2,7 +2,7 @@
 mode: full
 
 generation:
-  harness: mini_swe_agent  # or openhands
+  harness: mini_swe_agent  # mini_swe_agent, openhands, or opencollab
   model: openai/gpt-5.4
   runtime: docker
   benchmark_path: data/swe-bench-verified/SWE-bench_Verified
@@ -17,6 +17,16 @@ generation:
     keep_image: false
     cwd: /testbed
     pull_timeout: 900
+  # OpenCollab-only options. Team mode records collaboration in trajectory.jsonl.
+  harness_kwargs: {}
+  # harness_kwargs:
+  #   mode: team  # team or agent
+  #   provider: openai
+  #   budget: 1000000
+  #   team_config: config/opencollab_team.yaml
+  #   use_worktrees: true
+  #   prebuild_team: false
+  #   serialize_turns: false
 
 review:
   dataset: mini_swe_agent  # must match generation.harness
