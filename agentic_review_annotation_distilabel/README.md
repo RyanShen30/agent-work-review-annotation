@@ -6,6 +6,7 @@
 
 - `mini_swe_agent`：默认路径，使用专用 message step parser；
 - `openhands`：使用 event adapter；
+- `opencollab`：使用 JSONL trace adapter 和多 agent step parser；
 - `denovo`：保留兼容 adapter 和单元测试。
 
 处理流程：
@@ -35,6 +36,7 @@ export LLM_BASE_URL=https://example.com/v1
 
 ```bash
 ./scripts/run_mini_swe_agent.sh     # 仅生成 trajectory
+./scripts/run_opencollab.sh         # 仅生成 OpenCollab trajectory
 ./scripts/run_agent_work_review.sh  # 仅 review 已有 trajectory
 ./scripts/run_pipeline.sh           # 生成并 review
 ```
@@ -44,6 +46,7 @@ export LLM_BASE_URL=https://example.com/v1
 ```text
 config/example.yaml                         # 完整配置示例
 scripts/run_mini_swe_agent.sh               # traj-only 用户参数
+scripts/run_opencollab.sh                    # OpenCollab traj-only 用户参数
 scripts/run_agent_work_review.sh            # review-only 用户参数
 scripts/run_pipeline.sh                     # full 用户参数
 output/traj/                                # traj-only 结果
@@ -166,6 +169,10 @@ output/pipeline/private/                    # full private export
 - `evaluation` <- `outcome.exit_status`、`info.exit_status`、`eval_result`、`eval_logs`、`model_stats`
 
 每条 assistant message 与其后的 tool/user observations 会组成一个 `agent_turn`；开头的 system/user context 会放到第一个 step。
+
+## OpenCollab 适配
+
+runner 通过 OpenCollab public SDK 运行 `team`（默认）或 `agent`，读取其 `trajectory.jsonl` 和 manifest 后保存成单个统一 JSON。parser 以 `llm_call` 为 step 边界，并按 `aid` 将 `tool_exec`、消息、委派和生命周期事件归回对应 agent turn，因此可以处理并发交错的 team trace。
 
 ## 测试
 

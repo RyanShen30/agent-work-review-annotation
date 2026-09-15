@@ -15,7 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 class AgentConfig(BaseModel):
     """Runtime configuration shared by the supported agent harnesses."""
 
-    harness: Literal["mini_swe_agent", "openhands"]
+    harness: Literal["mini_swe_agent", "openhands", "opencollab"]
     model: str
     runtime: Literal["local", "docker"] = "local"
     workspace: Path = Path(".")
@@ -32,6 +32,7 @@ class AgentConfig(BaseModel):
     output_dir: Path = PROJECT_ROOT / "output" / "traj"
     model_kwargs: dict[str, Any] = Field(default_factory=dict)
     environment_kwargs: dict[str, Any] = Field(default_factory=dict)
+    harness_kwargs: dict[str, Any] = Field(default_factory=dict)
     benchmark_instance: dict[str, Any] | None = None
 
     @model_validator(mode="after")

@@ -6,11 +6,17 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
 from .base import AgentConfig
 from .mini_swe_agent import MiniSWEAgent
+from .opencollab import OpenCollabAgent
 from .openhands import OpenHandsAgent
 
-AGENTS = {"mini_swe_agent": MiniSWEAgent, "openhands": OpenHandsAgent}
+AGENTS = {
+    "mini_swe_agent": MiniSWEAgent,
+    "openhands": OpenHandsAgent,
+    "opencollab": OpenCollabAgent,
+}
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -27,7 +33,9 @@ def main() -> None:
     config.api_key = os.getenv("LLM_API_KEY")
     config.base_url = os.getenv("LLM_BASE_URL")
     if args.instance is not None:
-        config.instance = int(args.instance) if args.instance.isdigit() else args.instance
+        config.instance = (
+            int(args.instance) if args.instance.isdigit() else args.instance
+        )
     if args.output_dir:
         config.output_dir = args.output_dir
     if not config.api_key:
