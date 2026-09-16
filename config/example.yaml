@@ -32,6 +32,12 @@ review:
   dataset: mini_swe_agent  # must match generation.harness
   input: output/traj
   runner: llm
+  runtime: local  # local: existing prompt-only review; docker: repository tools
+  # docker_image: custom/review-image:tag  # optional override for trajectories without image metadata
+  # docker_cwd: /testbed  # optional override for trajectories without cwd metadata
+  # docker_platform: linux/amd64  # optional override; SWE-bench x86_64 images are detected automatically
+  command_timeout: 120
+  max_tool_calls: 12
   use_cache: true
   model:
     model: gpt-5.4

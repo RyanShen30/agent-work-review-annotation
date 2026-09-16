@@ -6,9 +6,9 @@ CONFIG=config/example.yaml
 
 # Trajectory generation
 HARNESS=mini_swe_agent
-GENERATION_MODEL=openai/gpt-5.4
+GENERATION_MODEL=deepseek/deepseek-flash
 RUNTIME=docker
-BENCHMARK_PATH=data/swe-bench-verified/SWE-bench_Verified
+BENCHMARK_PATH=data/SWE-bench_Verified
 INSTANCE=10
 WORKSPACE=.
 STEP_LIMIT=50
@@ -21,10 +21,10 @@ PULL_TIMEOUT=900
 
 # Review
 DATASET=mini_swe_agent
-INPUT=output/traj
 RUNNER=llm
+REVIEW_RUNTIME=docker
 USE_CACHE=true
-REVIEW_MODEL=gpt-5.4
+REVIEW_MODEL=deepseek-flash
 TEMPERATURE=0.0
 MAX_NEW_TOKENS=4096
 TIMEOUT_SECONDS=120
@@ -50,8 +50,8 @@ exec .venv/bin/python main.py --config "$CONFIG" --mode full \
   --set generation.environment_kwargs.cwd="$CWD" \
   --set generation.environment_kwargs.pull_timeout="$PULL_TIMEOUT" \
   --set review.dataset="$DATASET" \
-  --set review.input="$INPUT" \
   --set review.runner="$RUNNER" \
+  --set review.runtime="$REVIEW_RUNTIME" \
   --set review.use_cache="$USE_CACHE" \
   --set review.model.model="$REVIEW_MODEL" \
   --set review.model.temperature="$TEMPERATURE" \

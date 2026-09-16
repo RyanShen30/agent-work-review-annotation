@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import SecretStr
 
@@ -22,6 +22,12 @@ class DistilabelPipelineConfig:
         self,
         *,
         runner: str,
+        runtime: Literal["local", "docker"] = "local",
+        docker_image: str | None = None,
+        docker_cwd: str | None = None,
+        docker_platform: str | None = None,
+        command_timeout: int = 120,
+        max_tool_calls: int = 12,
         model: str,
         api_key: str | None,
         base_url: str | None,
@@ -34,7 +40,17 @@ class DistilabelPipelineConfig:
         output_dir: Path,
         use_cache: bool,
     ) -> None:
+        if runtime not in {"local", "docker"}:
+            raise ValueError("review.runtime must be 'local' or 'docker'")
+        if command_timeout <= 0 or max_tool_calls < 0:
+            raise ValueError("review command_timeout must be positive and max_tool_calls nonnegative")
         self.runner = runner
+        self.runtime = runtime
+        self.docker_image = docker_image
+        self.docker_cwd = docker_cwd
+        self.docker_platform = docker_platform
+        self.command_timeout = command_timeout
+        self.max_tool_calls = max_tool_calls
         self.model = model
         self.api_key = api_key
         self.base_url = base_url
@@ -57,6 +73,8 @@ def run_annotation_pipeline(
 
     if config.runner == "mock":
         return _run_mock_annotation(rows, config)
+    if config.runtime == "docker":
+        return _run_docker_annotation(rows, config)
 
     generations_by_instance: dict[str, dict[str, str]] = {
         str(row["instance_id"]): {} for row in rows
@@ -81,6 +99,39 @@ def run_annotation_pipeline(
         rows,
         generations_by_instance=generations_by_instance,
         model_by_instance=model_by_instance,
+        failed_dir=config.output_dir / "_failed",
+    )
+
+
+def _run_docker_annotation(
+    rows: list[dict[str, Any]], config: DistilabelPipelineConfig
+) -> list[dict[str, Any]]:
+    from openai import OpenAI
+
+    from agentic_review_annotation_distilabel.pipelines.review_docker import (
+        review_container,
+        run_agentic_annotator,
+    )
+
+    generations_by_instance: dict[str, dict[str, str]] = {}
+    with OpenAI(
+        api_key=config.api_key,
+        base_url=config.base_url,
+        timeout=config.timeout_seconds,
+        max_retries=config.max_retries,
+    ) as client:
+        for row in rows:
+            instance_id = str(row["instance_id"])
+            generations_by_instance[instance_id] = {}
+            for agent in ANNOTATION_AGENTS:
+                with review_container(row, config) as run_command:
+                    generations_by_instance[instance_id][agent.name] = run_agentic_annotator(
+                        row, agent, config, client, run_command
+                    )
+    return _merge_annotator_generations(
+        rows,
+        generations_by_instance=generations_by_instance,
+        model_by_instance={str(row["instance_id"]): config.model for row in rows},
         failed_dir=config.output_dir / "_failed",
     )
 

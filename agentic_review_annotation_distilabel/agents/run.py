@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from .base import AgentConfig
+from .base import AgentConfig, PROJECT_ROOT, trajectory_filename
 from .mini_swe_agent import MiniSWEAgent
 from .opencollab import OpenCollabAgent
 from .openhands import OpenHandsAgent
@@ -17,7 +18,6 @@ AGENTS = {
     "openhands": OpenHandsAgent,
     "opencollab": OpenCollabAgent,
 }
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def main() -> None:
@@ -38,26 +38,57 @@ def main() -> None:
         )
     if args.output_dir:
         config.output_dir = args.output_dir
-    if not config.api_key:
-        parser.error("export LLM_API_KEY before running")
     instances = (
         load_instances(config.benchmark_path, config.instance)
         if config.benchmark_path
         else [None]
     )
+    configured_image = config.docker_image
     for instance in instances:
         if instance:
             config.instance_id = str(instance["instance_id"])
             config.base_commit = instance.get("base_commit")
             config.docker_image = (
-                config.docker_image or instance.get("image") or swebench_image(instance)
+                configured_image or instance.get("image") or swebench_image(instance)
             )
             config.benchmark_instance = instance
         problem = args.problem or (instance and instance.get("problem_statement"))
         if not problem:
             parser.error("provide --problem or benchmark_path in YAML")
+        output_dir = config.output_dir
+        if not output_dir.is_absolute():
+            output_dir = PROJECT_ROOT / output_dir
+        path = output_dir / trajectory_filename(config.harness, config.model, problem)
+        if reusable_trajectory(path, config, problem):
+            print(f"reusing trajectory: {path}")
+            print(path)
+            continue
+        if not config.api_key:
+            parser.error("export LLM_API_KEY before running")
         result = AGENTS[config.harness](config).run(problem)
         print(result["output_path"])
+
+
+def reusable_trajectory(path: Path, config: AgentConfig, problem: str) -> bool:
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError):
+        return False
+    return (
+        isinstance(saved, dict)
+        and saved.get("harness") == config.harness
+        and saved.get("instance_id") == config.instance_id
+        and saved.get("problem") == problem
+        and any(isinstance(saved.get(key), list) for key in ("messages", "events", "trajectory"))
+        and (
+            config.runtime != "docker"
+            or (
+                isinstance(saved.get("review_workspace"), dict)
+                and saved["review_workspace"].get("image") == config.docker_image
+                and saved["review_workspace"].get("base_commit") == config.base_commit
+            )
+        )
+    )
 
 
 def load_instances(path: Path | str, selector: int | str) -> list[dict[str, Any]]:

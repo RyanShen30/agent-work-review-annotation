@@ -6,10 +6,10 @@ CONFIG=config/example.yaml
 
 # Trajectory generation
 HARNESS=mini_swe_agent
-MODEL=openai/gpt-5.4
+MODEL=deepseek-flash
 RUNTIME=docker
-BENCHMARK_PATH=data/swe-bench-verified/SWE-bench_Verified
-INSTANCE=10
+BENCHMARK_PATH=data/SWE-bench_Verified
+INSTANCE=1
 WORKSPACE=.
 STEP_LIMIT=50
 COST_LIMIT=3.0

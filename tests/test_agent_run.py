@@ -4,7 +4,7 @@ import types
 from pathlib import Path
 
 from agentic_review_annotation_distilabel.agents import run
-from agentic_review_annotation_distilabel.agents.base import AgentConfig
+from agentic_review_annotation_distilabel.agents.base import AgentConfig, trajectory_filename
 from agentic_review_annotation_distilabel.agents.opencollab import OpenCollabAgent
 from agentic_review_annotation_distilabel.agents.run import (
     load_instance,
@@ -18,6 +18,45 @@ def test_minus_one_loads_entire_benchmark(monkeypatch):
     monkeypatch.setattr(run, "load_benchmark", lambda path: rows)
 
     assert load_instances("benchmark", -1) == rows
+
+
+def test_existing_matching_trajectory_skips_generation(tmp_path, monkeypatch, capsys):
+    problem = "Fix it."
+    row = {"instance_id": "task-1", "problem_statement": problem}
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "generation:\n  harness: mini_swe_agent\n  model: test/model\n  benchmark_path: unused\n",
+        encoding="utf-8",
+    )
+    path = tmp_path / trajectory_filename("mini_swe_agent", "test/model", problem)
+    path.write_text(
+        json.dumps({"harness": "mini_swe_agent", "instance_id": "task-1", "problem": problem, "messages": [{}]}),
+        encoding="utf-8",
+    )
+    generated = []
+
+    class FakeAgent:
+        def __init__(self, config):
+            pass
+
+        def run(self, task):
+            generated.append(task)
+            return {"output_path": str(path)}
+
+    monkeypatch.setenv("LLM_API_KEY", "test")
+    monkeypatch.setattr(run, "load_instances", lambda path, selector: [row])
+    monkeypatch.setitem(run.AGENTS, "mini_swe_agent", FakeAgent)
+    monkeypatch.setattr(
+        sys, "argv", ["agents.run", "--config", str(config_path), "--output-dir", str(tmp_path)]
+    )
+
+    run.main()
+    assert generated == []
+    assert capsys.readouterr().out.splitlines()[-1] == str(path)
+
+    path.write_text(json.dumps({"instance_id": "another-task"}), encoding="utf-8")
+    run.main()
+    assert generated == [problem]
 
 
 def test_loads_first_swebench_image(tmp_path, monkeypatch):

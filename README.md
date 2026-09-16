@@ -2,7 +2,7 @@
 
 这个项目用于对于不同的coding agent问题使用不同的agent框架生成 的工作轨迹做自动预标注，产出结构化 JSON，之后供人工检查、修正，并沉淀成 GT。
 
-当前版本基于 Distilabel，默认处理 mini-swe-agent 生成的 trajectory，并可用 mini-swe-agent、OpenHands 或 OpenCollab 在 repository-level 任务上生成轨迹。
+当前版本默认处理 mini-swe-agent 生成的 trajectory，并可用 mini-swe-agent、OpenHands 或 OpenCollab 在 repository-level 任务上生成轨迹。Local review 使用 Distilabel；Docker review 可在 coding agent 的仓库副本中运行命令。
 
 ## 当前支持范围
 
@@ -22,7 +22,7 @@
 -> 对应 Adapter
 -> 确定性 step 切分
 -> 拼 annotation prompt
--> Distilabel 调用模型
+-> Distilabel（local）或仓库工具调用（docker）调用模型
 -> Pydantic 校验结构化 JSON
 -> 每条样本保存一个 annotation JSON
 ```
@@ -51,8 +51,9 @@ agentic_review_annotation_distilabel/
 │   ├── merge.py
 │   ├── prompt_builder.py
 │   └── schema.py
-├── pipelines/                # Distilabel pipeline
-│   └── distilabel_pipeline.py
+├── pipelines/                # Local / Docker review pipeline
+│   ├── distilabel_pipeline.py
+│   └── review_docker.py
 ├── prompts/
 │   └── annotation_v1.md
 └── run.py
@@ -120,7 +121,9 @@ export LLM_BASE_URL=https://example.com/v1
 
 生成与 review 阶段直接读取同一组变量；config 不保存凭证或 base URL，也不修改 thirdparty 代码。模型名称及其他运行参数在对应脚本顶部设置。
 
-顶层 `mode` 支持 `traj-only`、`review-only`、`full`。三个脚本都显式使用 `config/example.yaml`，并用脚本中的变量覆盖全部相关参数：
+顶层 `mode` 支持 `traj-only`、`review-only`、`full`。四个脚本都显式使用 `config/example.yaml`，并用脚本中的变量覆盖相关参数。运行 review 的 `run_agent_work_review.sh` 和 `run_pipeline.sh` 可通过顶部的 `REVIEW_RUNTIME=local` 或 `REVIEW_RUNTIME=docker`进行控制。
+
+`full` 模式会先检查 `output/pipeline/traj/` 中是否已有当前 harness、模型和 benchmark 实例的有效轨迹；存在时直接复用该文件并重新运行 review。需要重新生成轨迹时，删除对应的 JSON 文件后再运行脚本。
 
 ```bash
 ./scripts/run_mini_swe_agent.sh     # traj-only
@@ -153,7 +156,7 @@ export LLM_BASE_URL=https://example.com/v1
 ./scripts/run_agent_work_review.sh
 ```
 
-Mock 只检查 adapter、step parser、Distilabel pipeline 和输出保存流程，不代表真实标注质量。真实运行时将 `RUNNER` 改回 `llm`。
+Mock 只检查 adapter、step parser、标注合并和输出保存流程，不会启动 Docker 容器，也不代表真实标注质量。真实运行时将 `RUNNER` 改回 `llm`。
 
 ## 自动标注方式
 
@@ -172,6 +175,30 @@ canonical sample + canonical steps
 ```
 
 四个 annotator 接收相同的 `canonical_steps` 和相同 step 编号。`TaskCompletionQualityAnnotator` 可以接收 `evaluation` 等私有评测证据辅助 GT 构造；其他三个 annotator 默认只接收 task、repo/environment 元数据、generated patch 和 canonical steps。
+
+### Review 运行环境
+
+配置未指定 `review.runtime` 时默认为 `local`，沿用现有的 Distilabel 纯文本标注；两个 review 脚本当前都显式选用 `docker`。Docker 模式下，每个 annotator 都会从 coding agent 记录的镜像启动独立容器，在仓库中应用最终 `generated_patch`，并可通过 `run_command` 检索代码、编写临时测试和运行命令。容器在该 annotator 完成后删除；宿主仓库不会挂载，容器网络默认关闭。
+
+```yaml
+review:
+  runtime: docker
+  command_timeout: 120
+  max_tool_calls: 12
+  # docker_image: my-image:tag  # 旧轨迹缺少镜像信息时填写
+  # docker_cwd: /testbed       # 旧轨迹工作目录不正确时填写
+  # docker_platform: linux/amd64  # 其他单架构镜像可显式指定
+```
+
+新生成的 Docker 轨迹会保存镜像、工作目录和 base commit。旧 SWE-bench 轨迹会尝试从已有字段恢复；无法确定镜像时需设置 `review.docker_image`。Docker 模式需要可用的 Docker daemon 和支持工具调用的 OpenAI 兼容模型。为了重复 review 时避免重新拉取大镜像，可将 `generation.environment_kwargs.keep_image` 设为 `true`；无需保留运行中的 coding 容器。重建使用最终 patch，因此未包含在 patch 中的未跟踪文件或中间步骤状态不会出现在 reviewer 的仓库中。
+
+镜像名包含 `.x86_64.` 时，review 自动以 `linux/amd64` 启动；其他跨平台镜像可用 `review.docker_platform` 指定平台。
+
+镜像若包含晚于任务 `base_commit` 的初始化提交，review 会在临时容器中先回到 `base_commit`，再应用轨迹中的最终 diff；这不会修改镜像或宿主仓库。
+
+Docker 模式不使用 Distilabel 的模型缓存。`review-only` 默认跳过已有 annotation，使用 `--overwrite` 可重跑；`full` 每次都会重跑 review，即使复用了已有轨迹。
+
+测试已有轨迹时可运行：`.venv/bin/python main.py --config config/example.yaml --mode review-only --input output/traj/你的轨迹.json --set review.runtime=docker --overwrite`。
 
 每个 annotator 只输出自己的 typed result：
 
