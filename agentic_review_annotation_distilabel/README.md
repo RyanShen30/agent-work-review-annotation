@@ -12,7 +12,8 @@
 处理流程：
 
 ```text
-原始 JSON
+coding agent 轨迹 + generated patch
+-> 官方 SWE-bench evaluation 与结果回填（full 模式）
 -> Dataset Adapter
 -> 确定性 step 切分
 -> 四个专职 annotation prompt
@@ -56,6 +57,7 @@ output/annotation/annotation/               # review-only 标注
 output/annotation/public/                   # review-only public export
 output/annotation/private/                  # review-only private export
 output/pipeline/traj/                       # full 轨迹
+output/pipeline/evaluation/                 # 官方 predictions、reports 与日志
 output/pipeline/normalized/                 # full 标准化输入
 output/pipeline/preview/                    # full 人工预览
 output/pipeline/annotation/                 # full 标注
@@ -66,6 +68,8 @@ output/pipeline/private/                    # full private export
 无效的模型输出会写入对应 annotation 目录下的 `_failed/`。
 
 mini-swe-agent 的 Docker 运行可通过 `generation.environment_kwargs.save_final_snapshot: true` 在 coding 容器删除前保存最终镜像。Docker Reviewer 优先从该快照创建四个互相隔离的临时容器；旧轨迹或快照不可用时，回退到基础镜像加最终 patch。`full` 模式的 `cleanup_policy: on_success` 会在 review 成功后删除轨迹中登记的最终快照和基础镜像，失败时保留用于调试。
+
+`full` 模式在 review 前用官方 SWE-bench harness 对“原始官方镜像 + generated patch”进行评测并回填 trajectory。Correctness 和 Reporting reviewer 接收这份 evaluation；Safety 和 Efficiency reviewer 不接收。确定的 patch apply failure / test timeout 会单独记录；基础设施故障或无法分类的缺失 report 会终止流水线。
 
 ## 输出格式
 
@@ -101,7 +105,7 @@ mini-swe-agent 的 Docker 运行可通过 `generation.environment_kwargs.save_fi
   "annotation": {
     "auto": {
       "model": "...",
-      "prompt_version": "annotation_v3_sparse_run_level",
+      "prompt_version": "annotation_v4_official_evaluation",
       "step_reviews": [],
       "run_reviews": null
     },
@@ -175,7 +179,7 @@ mini-swe-agent 的 Docker 运行可通过 `generation.environment_kwargs.save_fi
 - `run.generated_patch` <- `info.submission` / `submission` / `generated_patch` / `model_patch` / runner 顶层 `patch`
 - `oracle.gold_patch` <- SWE-bench `patch`
 - `oracle.test_patch`、`fail_to_pass`、`pass_to_pass`、`eval_type`、`eval_image`、`eval_script`、`log_parser` <- SWE-bench 对应字段
-- `evaluation` <- `outcome.exit_status`、`info.exit_status`、`eval_result`、`eval_logs`、`model_stats`
+- `evaluation` <- 官方 evaluator 的 resolved、per-test facts、official report 和日志路径；旧轨迹回退到原有 outcome/eval 字段
 
 每条 assistant message 与其后的 tool/user observations 会组成一个 `agent_turn`；开头的 system/user context 会放到第一个 step。
 

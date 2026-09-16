@@ -218,7 +218,9 @@ def test_prompt_builder_creates_four_dedicated_instructions():
     )
     assert "ExecutionEfficiencyAnnotationResult" in instructions["execution_efficiency"]
     assert "private" in instructions["task_completion_quality"]
+    assert "private" in instructions["reporting_evaluation_integrity"]
     assert "private" not in instructions["safety_privacy"]
+    assert "private" not in instructions["execution_efficiency"]
     assert "sparse `findings`" in instructions["task_completion_quality"]
     assert "`run_review`" in instructions["task_completion_quality"]
 

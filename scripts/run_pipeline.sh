@@ -8,7 +8,7 @@ CONFIG=config/example.yaml
 HARNESS=mini_swe_agent
 GENERATION_MODEL=deepseek/deepseek-flash
 RUNTIME=docker
-BENCHMARK_PATH=data/SWE-bench_Verified
+BENCHMARK_PATH=data/swe-bench-verified/test.parquet
 INSTANCE=10
 WORKSPACE=.
 STEP_LIMIT=50
@@ -19,6 +19,12 @@ KEEP_IMAGE=true
 SAVE_FINAL_SNAPSHOT=true
 CWD=/testbed
 PULL_TIMEOUT=900
+
+# Official SWE-bench evaluation
+RUN_OFFICIAL_EVALUATION=true
+EVALUATION_TIMEOUT=1800
+EVALUATION_MAX_WORKERS=1
+EVALUATION_OPEN_FILE_LIMIT=4096
 
 # Review
 DATASET=mini_swe_agent
@@ -52,6 +58,11 @@ exec .venv/bin/python main.py --config "$CONFIG" --mode full \
   --set generation.environment_kwargs.save_final_snapshot="$SAVE_FINAL_SNAPSHOT" \
   --set generation.environment_kwargs.cwd="$CWD" \
   --set generation.environment_kwargs.pull_timeout="$PULL_TIMEOUT" \
+  --set evaluation.enabled="$RUN_OFFICIAL_EVALUATION" \
+  --set evaluation.runner=official_swebench \
+  --set evaluation.timeout="$EVALUATION_TIMEOUT" \
+  --set evaluation.max_workers="$EVALUATION_MAX_WORKERS" \
+  --set evaluation.open_file_limit="$EVALUATION_OPEN_FILE_LIMIT" \
   --set review.dataset="$DATASET" \
   --set review.runner="$RUNNER" \
   --set review.runtime="$REVIEW_RUNTIME" \

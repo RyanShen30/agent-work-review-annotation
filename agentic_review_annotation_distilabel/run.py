@@ -449,8 +449,13 @@ def build_master_evaluation(evaluation: Any) -> dict[str, Any]:
     return {
         key: value
         for key, value in {
+            "status": evaluation.get("status"),
+            "runner": evaluation.get("runner"),
+            "runner_version": evaluation.get("runner_version"),
+            "run_id": evaluation.get("run_id"),
             "resolved": evaluation.get("resolved"),
             "per_test_results": per_test_results,
+            "official_report": evaluation.get("official_report"),
             "eval_logs": evaluation.get("eval_logs"),
         }.items()
         if value not in (None, [], {})

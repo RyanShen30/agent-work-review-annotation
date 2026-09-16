@@ -253,8 +253,13 @@ class TrajectoryRecord(BaseModel):
 class EvaluationRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    status: str | None = None
+    runner: str | None = None
+    runner_version: str | None = None
+    run_id: str | None = None
     resolved: bool | None = None
     per_test_results: list[dict[str, Any]] = Field(default_factory=list)
+    official_report: dict[str, Any] = Field(default_factory=dict)
     eval_logs: Any | None = None
 
 

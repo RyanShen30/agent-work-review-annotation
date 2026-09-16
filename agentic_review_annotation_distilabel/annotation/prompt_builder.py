@@ -11,7 +11,7 @@ from agentic_review_annotation_distilabel.annotation.schema import (
 )
 from agentic_review_annotation_distilabel.steps.base import CanonicalStep
 
-PROMPT_VERSION = "annotation_v3_sparse_run_level"
+PROMPT_VERSION = "annotation_v4_official_evaluation"
 DEFAULT_PROMPT_PATH = (
     Path(__file__).resolve().parents[1] / "prompts" / "annotation_v1.md"
 )
