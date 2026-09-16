@@ -20,6 +20,7 @@ def main() -> None:
     parser.add_argument("--input", type=Path, help="Trajectory file/directory for review-only mode.")
     parser.add_argument("--instance", help="Benchmark row index or instance_id override.")
     parser.add_argument("--runner", choices=["llm", "mock"], help="Review runner override.")
+    parser.add_argument("--overwrite", action="store_true", help="Re-run review for existing annotations.")
     parser.add_argument("--set", action="append", default=[], metavar="PATH=VALUE")
     args = parser.parse_args()
 
@@ -58,9 +59,14 @@ def main() -> None:
         ]
         if args.instance is not None:
             command += ["--instance", args.instance]
-        run(command, env)
+        output = run(command, env)
         selector = args.instance if args.instance is not None else generation.get("instance")
-        trajectory = output_dir if str(selector) == "-1" else newest_json(output_dir)
+        if str(selector) == "-1":
+            trajectory = output_dir
+        else:
+            trajectory = Path(output.splitlines()[-1]) if output else None
+            if trajectory is None or not trajectory.is_file() or trajectory.parent != output_dir:
+                raise FileNotFoundError(f"trajectory was not created under {output_dir}")
 
     if mode in {"review-only", "full"}:
         base = ROOT / "output" / ("annotation" if mode == "review-only" else "pipeline")
@@ -75,7 +81,7 @@ def main() -> None:
             "--private-dir", str(base / "private"),
             "--cache-dir", str(base / "cache"),
         ]
-        if mode == "full":
+        if mode == "full" or args.overwrite:
             command += ["--overwrite"]
         if args.runner:
             command += ["--runner", args.runner]
@@ -110,13 +116,6 @@ def model_env() -> dict[str, str]:
     env.setdefault("MSWEA_SILENT_STARTUP", "1")
     env.setdefault("OPENHANDS_SUPPRESS_BANNER", "1")
     return env
-
-
-def newest_json(directory: Path) -> Path:
-    files = list(directory.glob("*.json"))
-    if not files:
-        raise FileNotFoundError(f"trajectory was not created under {directory}")
-    return max(files, key=lambda path: path.stat().st_mtime)
 
 
 def run(command: list[str], env: dict[str, str]) -> str:

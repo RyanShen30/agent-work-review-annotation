@@ -129,6 +129,12 @@ def main() -> None:
     base_url = os.environ.get("LLM_BASE_URL")
     pipeline_config = DistilabelPipelineConfig(
         runner=runner,
+        runtime=config.get("runtime", "local"),
+        docker_image=config.get("docker_image"),
+        docker_cwd=config.get("docker_cwd"),
+        docker_platform=config.get("docker_platform"),
+        command_timeout=int(config.get("command_timeout", 120)),
+        max_tool_calls=int(config.get("max_tool_calls", 12)),
         model=model_config.get("model") or ("mock" if runner == "mock" else "gpt-4.1"),
         api_key=api_key,
         base_url=base_url,
@@ -308,6 +314,7 @@ def prepare_rows(
                 "repository": sample.repository,
                 "environment": sample.environment,
                 "generated_patch": sample.patch,
+                "review_workspace": review_workspace_from_raw(raw),
                 "evaluation": sample.evaluation,
                 "trajectory": sample.trajectory,
                 "canonical_steps": normalized["canonical_steps"],
@@ -325,6 +332,26 @@ def prepare_rows(
         f"prepared: inputs={len(input_paths)} queued={len(rows)} skipped_existing={skipped}"
     )
     return rows
+
+
+def review_workspace_from_raw(raw: dict[str, Any]) -> dict[str, Any]:
+    saved = raw.get("review_workspace")
+    if isinstance(saved, dict):
+        return saved
+    swebench = raw.get("swebench") if isinstance(raw.get("swebench"), dict) else {}
+    info = raw.get("info") if isinstance(raw.get("info"), dict) else {}
+    config = info.get("config") if isinstance(info.get("config"), dict) else {}
+    environment = config.get("environment") if isinstance(config.get("environment"), dict) else {}
+    image = raw.get("image") or swebench.get("image") or environment.get("image")
+    if not image and swebench.get("instance_id"):
+        from agentic_review_annotation_distilabel.agents.run import swebench_image
+
+        image = swebench_image(swebench)
+    return {
+        "image": image,
+        "cwd": environment.get("cwd") or raw.get("repo_path") or "/testbed",
+        "base_commit": raw.get("base_commit") or swebench.get("base_commit"),
+    }
 
 
 def build_normalized_preview(normalized: dict[str, Any]) -> dict[str, Any]:

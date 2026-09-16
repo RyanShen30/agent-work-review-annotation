@@ -53,6 +53,13 @@ class Agent(ABC):
         """Run one problem and return the saved trajectory."""
 
     def save(self, problem: str, result: dict[str, Any]) -> Path:
+        if self.config.runtime == "docker":
+            default_cwd = "/workspace" if self.harness_name == "mini_swe_agent" else "/testbed"
+            result["review_workspace"] = {
+                "image": self.config.docker_image,
+                "cwd": "/testbed" if self.harness_name == "openhands" else self.config.environment_kwargs.get("cwd", default_cwd),
+                "base_commit": self.config.base_commit,
+            }
         output_dir = self.config.output_dir
         if not output_dir.is_absolute():
             output_dir = PROJECT_ROOT / output_dir
@@ -64,10 +71,14 @@ class Agent(ABC):
         return path
 
     def output_name(self, problem: str) -> str:
-        slug = re.sub(r"[^a-zA-Z0-9]+", "-", problem).strip("-").lower()[:48] or "task"
-        digest = hashlib.sha256(problem.encode()).hexdigest()[:8]
-        model = re.sub(r"[^a-zA-Z0-9._-]+", "-", self.config.model).strip("-")
-        return f"{self.harness_name}__{model}__{slug}-{digest}.json"
+        return trajectory_filename(self.harness_name, self.config.model, problem)
+
+
+def trajectory_filename(harness: str, model: str, problem: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", problem).strip("-").lower()[:48] or "task"
+    digest = hashlib.sha256(problem.encode()).hexdigest()[:8]
+    model = re.sub(r"[^a-zA-Z0-9._-]+", "-", model).strip("-")
+    return f"{harness}__{model}__{slug}-{digest}.json"
 
 
 SENSITIVE_KEYS = {"api_key", "authorization", "access_token", "password", "secret"}

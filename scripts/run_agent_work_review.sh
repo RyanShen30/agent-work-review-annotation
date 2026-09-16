@@ -6,10 +6,11 @@ CONFIG=config/example.yaml
 
 # Review
 DATASET=mini_swe_agent
-INPUT=output/traj
+INPUT=output/pipeline/traj
 RUNNER=llm
+REVIEW_RUNTIME=docker
 USE_CACHE=true
-MODEL=gpt-5.4
+MODEL=deepseek-flash
 TEMPERATURE=0.0
 MAX_NEW_TOKENS=4096
 TIMEOUT_SECONDS=120
@@ -24,6 +25,7 @@ exec .venv/bin/python main.py --config "$CONFIG" --mode review-only \
   --set review.dataset="$DATASET" \
   --set review.input="$INPUT" \
   --set review.runner="$RUNNER" \
+  --set review.runtime="$REVIEW_RUNTIME" \
   --set review.use_cache="$USE_CACHE" \
   --set review.model.model="$MODEL" \
   --set review.model.temperature="$TEMPERATURE" \
