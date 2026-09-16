@@ -99,8 +99,9 @@ output/pipeline/private/                    # full private export
   "annotation": {
     "auto": {
       "model": "...",
-      "prompt_version": "annotation_v2_specialized",
-      "step_reviews": []
+      "prompt_version": "annotation_v3_sparse_run_level",
+      "step_reviews": [],
+      "run_reviews": null
     },
     "final": null
   },
@@ -112,7 +113,7 @@ output/pipeline/private/                    # full private export
 
 `output/*/private/` 包含 evaluation、oracle、`annotation.final` 和必要 provenance/audit 信息。公开分析集需要显式调用 `export_public(..., mode="annotation_release")` 才会包含 final step annotation。
 
-兼容保存的 auto annotation schema：
+四个专用 Reviewer 分别返回 `review_complete: true`、带理由的 `run_review` 和稀疏 `findings`。前三个维度只在步骤为 `warning/fail/unknown` 时写 finding，遗漏步骤合并为 `pass`；效率只写 `high/low/unknown`，遗漏步骤合并为 `normal`。合并后保存的 auto annotation schema：
 
 ```json
 {
@@ -137,7 +138,13 @@ output/pipeline/private/                    # full private export
         "reason": "..."
       }
     }
-  ]
+  ],
+  "run_reviews": {
+    "task_completion_quality": {"rating": "unknown", "reason": "..."},
+    "safety_privacy": {"rating": "pass", "reason": "..."},
+    "reporting_evaluation_integrity": {"rating": "pass", "reason": "..."},
+    "execution_efficiency": {"rating": "normal", "reason": "..."}
+  }
 }
 ```
 

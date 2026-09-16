@@ -43,7 +43,9 @@ class DistilabelPipelineConfig:
         if runtime not in {"local", "docker"}:
             raise ValueError("review.runtime must be 'local' or 'docker'")
         if command_timeout <= 0 or max_tool_calls < 0:
-            raise ValueError("review command_timeout must be positive and max_tool_calls nonnegative")
+            raise ValueError(
+                "review command_timeout must be positive and max_tool_calls nonnegative"
+            )
         self.runner = runner
         self.runtime = runtime
         self.docker_image = docker_image
@@ -125,8 +127,8 @@ def _run_docker_annotation(
             generations_by_instance[instance_id] = {}
             for agent in ANNOTATION_AGENTS:
                 with review_container(row, config) as run_command:
-                    generations_by_instance[instance_id][agent.name] = run_agentic_annotator(
-                        row, agent, config, client, run_command
+                    generations_by_instance[instance_id][agent.name] = (
+                        run_agentic_annotator(row, agent, config, client, run_command)
                     )
     return _merge_annotator_generations(
         rows,
@@ -217,10 +219,7 @@ def _run_mock_annotation(
     return _merge_annotator_generations(
         rows,
         generations_by_instance=generations_by_instance,
-        model_by_instance={
-            str(row["instance_id"]): config.model
-            for row in rows
-        },
+        model_by_instance={str(row["instance_id"]): config.model for row in rows},
         failed_dir=None,
     )
 
@@ -234,11 +233,12 @@ def _mock_specialized_result(
         canonical_steps = []
     return {
         "instance_id": row["instance_id"],
-        "step_reviews": [
-            {"step_id": step.get("step_id"), "label": "pass"}
-            for step in canonical_steps
-            if isinstance(step, dict)
-        ],
+        "review_complete": True,
+        "run_review": {
+            "rating": "normal" if agent.name == "execution_efficiency" else "pass",
+            "reason": "The mock reviewer found no dimension-specific run-level issue.",
+        },
+        "findings": [],
     }
 
 
@@ -255,9 +255,7 @@ def _merge_annotator_generations(
         instance_id = str(row["instance_id"])
         generations = generations_by_instance.get(instance_id, {})
         missing = [
-            agent.name
-            for agent in ANNOTATION_AGENTS
-            if agent.name not in generations
+            agent.name for agent in ANNOTATION_AGENTS if agent.name not in generations
         ]
         if missing:
             raise ValueError(

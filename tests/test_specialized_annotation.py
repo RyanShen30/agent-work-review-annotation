@@ -22,18 +22,22 @@ from agentic_review_annotation_distilabel.pipelines.distilabel_pipeline import (
 )
 
 
-def test_merges_four_specialized_results_into_legacy_step_review():
+def test_merges_sparse_specialized_results_into_dense_step_and_run_reviews():
     merged = merge_specialized_annotations(
         instance_id="sample",
         valid_step_ids=[1, 2],
         correctness=CorrectnessAnnotationResult.model_validate(
             {
                 "instance_id": "sample",
-                "step_reviews": [
-                    {"step_id": 1, "label": "pass"},
+                "review_complete": True,
+                "run_review": {
+                    "rating": "warning",
+                    "reason": "A correctness problem was later recovered.",
+                },
+                "findings": [
                     {
                         "step_id": 2,
-                        "label": "error",
+                        "rating": "fail",
                         "reason": "The step changed the wrong API.",
                         "recovery": True,
                     },
@@ -43,20 +47,23 @@ def test_merges_four_specialized_results_into_legacy_step_review():
         safety_privacy=SafetyPrivacyAnnotationResult.model_validate(
             {
                 "instance_id": "sample",
-                "step_reviews": [
-                    {"step_id": 1, "label": "pass"},
-                    {"step_id": 2, "label": "pass"},
-                ],
+                "review_complete": True,
+                "run_review": {"rating": "pass", "reason": "No safety issue."},
+                "findings": [],
             }
         ),
         reporting_integrity=ReportingIntegrityAnnotationResult.model_validate(
             {
                 "instance_id": "sample",
-                "step_reviews": [
-                    {"step_id": 1, "label": "pass"},
+                "review_complete": True,
+                "run_review": {
+                    "rating": "warning",
+                    "reason": "The final report contained an unsupported test claim.",
+                },
+                "findings": [
                     {
                         "step_id": 2,
-                        "label": "issue",
+                        "rating": "warning",
                         "reason": "The step claimed tests passed without running them.",
                     },
                 ],
@@ -65,11 +72,15 @@ def test_merges_four_specialized_results_into_legacy_step_review():
         execution_efficiency=ExecutionEfficiencyAnnotationResult.model_validate(
             {
                 "instance_id": "sample",
-                "step_reviews": [
-                    {"step_id": 1, "label": "pass"},
+                "review_complete": True,
+                "run_review": {
+                    "rating": "low",
+                    "reason": "The run repeated ineffective work.",
+                },
+                "findings": [
                     {
                         "step_id": 2,
-                        "label": "issue",
+                        "rating": "low",
                         "reason": "The step repeated the same failed command.",
                     },
                 ],
@@ -92,74 +103,89 @@ def test_merges_four_specialized_results_into_legacy_step_review():
         "recovery": True,
     }
     assert dumped["step_reviews"][1]["execution_efficiency"]["rating"] == "low"
+    assert dumped["run_reviews"]["task_completion_quality"] == {
+        "rating": "warning",
+        "reason": "A correctness problem was later recovered.",
+    }
+    assert dumped["run_reviews"]["execution_efficiency"]["rating"] == "low"
 
 
 def test_rejects_invalid_specialized_outputs_before_merge():
-    with pytest.raises(ValueError, match="pass correctness annotations must omit reason"):
+    with pytest.raises(
+        ValueError, match="Input should be 'warning', 'fail' or 'unknown'"
+    ):
         CorrectnessAnnotationResult.model_validate(
             {
                 "instance_id": "sample",
-                "step_reviews": [
-                    {"step_id": 1, "label": "pass", "reason": "Looks fine."}
+                "review_complete": True,
+                "run_review": {"rating": "pass", "reason": "No issue."},
+                "findings": [{"step_id": 1, "rating": "pass", "reason": "Looks fine."}],
+            }
+        )
+
+    with pytest.raises(ValueError, match="Input should be True"):
+        CorrectnessAnnotationResult.model_validate(
+            {
+                "instance_id": "sample",
+                "review_complete": True,
+                "run_review": {"rating": "fail", "reason": "Wrong API."},
+                "findings": [
+                    {
+                        "step_id": 1,
+                        "rating": "fail",
+                        "reason": "Wrong API.",
+                        "recovery": False,
+                    }
                 ],
             }
         )
 
-    with pytest.raises(ValueError, match="recovery must be true when present"):
-        CorrectnessAnnotationResult.model_validate(
-            {
-                "instance_id": "sample",
-                "step_reviews": [
-                    {"step_id": 1, "label": "error", "reason": "Wrong API.", "recovery": False}
-                ],
-            }
-        )
-
-    with pytest.raises(ValueError, match="pass annotations must omit reason"):
+    with pytest.raises(ValueError, match="findings must include a non-empty reason"):
         SafetyPrivacyAnnotationResult.model_validate(
             {
                 "instance_id": "sample",
-                "step_reviews": [
-                    {"step_id": 1, "label": "pass", "reason": None}
-                ],
+                "review_complete": True,
+                "run_review": {"rating": "warning", "reason": "Risk found."},
+                "findings": [{"step_id": 1, "rating": "warning", "reason": ""}],
             }
         )
 
-    with pytest.raises(ValueError, match="missing step ids: 2"):
+    with pytest.raises(ValueError, match="unknown step ids: 3"):
         merge_specialized_annotations(
             instance_id="sample",
             valid_step_ids=[1, 2],
             correctness=CorrectnessAnnotationResult.model_validate(
                 {
                     "instance_id": "sample",
-                    "step_reviews": [{"step_id": 1, "label": "pass"}],
+                    "review_complete": True,
+                    "run_review": {"rating": "fail", "reason": "Wrong step."},
+                    "findings": [
+                        {"step_id": 3, "rating": "fail", "reason": "Wrong API."}
+                    ],
                 }
             ),
             safety_privacy=SafetyPrivacyAnnotationResult.model_validate(
                 {
                     "instance_id": "sample",
-                    "step_reviews": [
-                        {"step_id": 1, "label": "pass"},
-                        {"step_id": 2, "label": "pass"},
-                    ],
+                    "review_complete": True,
+                    "run_review": {"rating": "pass", "reason": "No issue."},
+                    "findings": [],
                 }
             ),
             reporting_integrity=ReportingIntegrityAnnotationResult.model_validate(
                 {
                     "instance_id": "sample",
-                    "step_reviews": [
-                        {"step_id": 1, "label": "pass"},
-                        {"step_id": 2, "label": "pass"},
-                    ],
+                    "review_complete": True,
+                    "run_review": {"rating": "pass", "reason": "No issue."},
+                    "findings": [],
                 }
             ),
             execution_efficiency=ExecutionEfficiencyAnnotationResult.model_validate(
                 {
                     "instance_id": "sample",
-                    "step_reviews": [
-                        {"step_id": 1, "label": "pass"},
-                        {"step_id": 2, "label": "pass"},
-                    ],
+                    "review_complete": True,
+                    "run_review": {"rating": "normal", "reason": "Normal run."},
+                    "findings": [],
                 }
             ),
         )
@@ -186,12 +212,15 @@ def test_prompt_builder_creates_four_dedicated_instructions():
     assert set(instructions) == {agent.name for agent in ANNOTATION_AGENTS}
     assert "CorrectnessAnnotationResult" in instructions["task_completion_quality"]
     assert "SafetyPrivacyAnnotationResult" in instructions["safety_privacy"]
-    assert "ReportingIntegrityAnnotationResult" in instructions[
-        "reporting_evaluation_integrity"
-    ]
+    assert (
+        "ReportingIntegrityAnnotationResult"
+        in instructions["reporting_evaluation_integrity"]
+    )
     assert "ExecutionEfficiencyAnnotationResult" in instructions["execution_efficiency"]
     assert "private" in instructions["task_completion_quality"]
     assert "private" not in instructions["safety_privacy"]
+    assert "sparse `findings`" in instructions["task_completion_quality"]
+    assert "`run_review`" in instructions["task_completion_quality"]
 
 
 def test_mock_pipeline_performs_four_independent_specialized_generations(tmp_path):
@@ -199,7 +228,9 @@ def test_mock_pipeline_performs_four_independent_specialized_generations(tmp_pat
         "instance_id": "sample",
         "canonical_steps": [{"step_id": 1}, {"step_id": 2}],
         "valid_step_ids": [1, 2],
-        "annotator_instructions": {agent.name: agent.name for agent in ANNOTATION_AGENTS},
+        "annotator_instructions": {
+            agent.name: agent.name for agent in ANNOTATION_AGENTS
+        },
     }
     config = DistilabelPipelineConfig(
         runner="mock",
@@ -225,9 +256,7 @@ def test_mock_pipeline_performs_four_independent_specialized_generations(tmp_pat
     assert generation["step_reviews"][0]["task_completion_quality"] == {
         "rating": "pass"
     }
-    assert generation["step_reviews"][0]["execution_efficiency"] == {
-        "rating": "normal"
-    }
+    assert generation["step_reviews"][0]["execution_efficiency"] == {"rating": "normal"}
 
 
 def test_invalid_annotator_generation_is_written_to_failed_dir(tmp_path):
@@ -235,7 +264,14 @@ def test_invalid_annotator_generation_is_written_to_failed_dir(tmp_path):
         agent.name: json.dumps(
             {
                 "instance_id": "sample",
-                "step_reviews": [{"step_id": 1, "label": "pass"}],
+                "review_complete": True,
+                "run_review": {
+                    "rating": "normal"
+                    if agent.name == "execution_efficiency"
+                    else "pass",
+                    "reason": "No issue found.",
+                },
+                "findings": [],
             }
         )
         for agent in ANNOTATION_AGENTS
@@ -243,7 +279,9 @@ def test_invalid_annotator_generation_is_written_to_failed_dir(tmp_path):
     generations["safety_privacy"] = json.dumps(
         {
             "instance_id": "sample",
-            "step_reviews": [{"step_id": 1, "label": "pass", "reason": None}],
+            "review_complete": False,
+            "run_review": {"rating": "pass", "reason": "No issue found."},
+            "findings": [],
         }
     )
 

@@ -7,7 +7,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-
 QualityRating = Literal["pass", "warning", "fail", "unknown"]
 EfficiencyRating = Literal["high", "normal", "low", "unknown"]
 
@@ -86,111 +85,123 @@ class StepReview(BaseModel):
     execution_efficiency: ExecutionEfficiencyReview
 
 
-class CorrectnessStepAnnotation(BaseModel):
+class QualityRunReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rating: QualityRating
+    reason: str = Field(min_length=1)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def normalize_reason(cls, value: Any) -> Any:
+        if not isinstance(value, str) or not " ".join(value.split()):
+            raise ValueError("run-level reviews must include a non-empty reason")
+        return " ".join(value.split())
+
+
+class EfficiencyRunReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rating: EfficiencyRating
+    reason: str = Field(min_length=1)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def normalize_reason(cls, value: Any) -> Any:
+        if not isinstance(value, str) or not " ".join(value.split()):
+            raise ValueError("run-level reviews must include a non-empty reason")
+        return " ".join(value.split())
+
+
+class RunReviews(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_completion_quality: QualityRunReview
+    safety_privacy: QualityRunReview
+    reporting_evaluation_integrity: QualityRunReview
+    execution_efficiency: EfficiencyRunReview
+
+
+class CorrectnessStepFinding(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     step_id: int
-    label: Literal["pass", "error"]
-    reason: str | None = Field(default=None, min_length=1)
+    rating: Literal["warning", "fail", "unknown"]
+    reason: str = Field(min_length=1)
     recovery: Literal[True] | None = None
 
-    @model_validator(mode="before")
-    @classmethod
-    def reject_disallowed_fields(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        if data.get("label") == "pass":
-            if "reason" in data:
-                raise ValueError("pass correctness annotations must omit reason")
-            if "recovery" in data:
-                raise ValueError("pass correctness annotations must omit recovery")
-        if "recovery" in data and data.get("recovery") is not True:
-            raise ValueError("recovery must be true when present")
-        return data
-
     @field_validator("reason", mode="before")
     @classmethod
-    def blank_reason_is_absent(cls, value: Any) -> Any:
-        return _blank_string_to_none(value)
-
-    @field_validator("reason")
-    @classmethod
-    def normalize_reason(cls, value: str | None) -> str | None:
-        return _normalize_optional_reason(value)
+    def normalize_reason(cls, value: Any) -> Any:
+        return _normalize_required_reason(value)
 
     @model_validator(mode="after")
-    def validate_reason_and_recovery(self) -> "CorrectnessStepAnnotation":
-        if self.label == "pass":
-            if self.reason is not None:
-                raise ValueError("pass correctness annotations must omit reason")
-            if self.recovery is not None:
-                raise ValueError("pass correctness annotations must omit recovery")
-        elif not self.reason:
-            raise ValueError("error correctness annotations must include reason")
-        if self.recovery is True and self.label != "error":
-            raise ValueError("recovery can only appear on correctness error annotations")
+    def validate_recovery(self) -> CorrectnessStepFinding:
+        if self.recovery is True and self.rating not in {"warning", "fail"}:
+            raise ValueError("recovery can only appear on warning or fail findings")
         return self
 
 
-class IssueStepAnnotation(BaseModel):
+class QualityStepFinding(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     step_id: int
-    label: Literal["pass", "issue"]
-    reason: str | None = Field(default=None, min_length=1)
-
-    @model_validator(mode="before")
-    @classmethod
-    def reject_reason_on_pass(cls, data: Any) -> Any:
-        if isinstance(data, dict) and data.get("label") == "pass" and "reason" in data:
-            raise ValueError("pass annotations must omit reason")
-        return data
+    rating: Literal["warning", "fail", "unknown"]
+    reason: str = Field(min_length=1)
 
     @field_validator("reason", mode="before")
     @classmethod
-    def blank_reason_is_absent(cls, value: Any) -> Any:
-        return _blank_string_to_none(value)
+    def normalize_reason(cls, value: Any) -> Any:
+        return _normalize_required_reason(value)
 
-    @field_validator("reason")
+
+class EfficiencyStepFinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: int
+    rating: Literal["high", "low", "unknown"]
+    reason: str = Field(min_length=1)
+
+    @field_validator("reason", mode="before")
     @classmethod
-    def normalize_reason(cls, value: str | None) -> str | None:
-        return _normalize_optional_reason(value)
-
-    @model_validator(mode="after")
-    def validate_reason(self) -> "IssueStepAnnotation":
-        if self.label == "pass" and self.reason is not None:
-            raise ValueError("pass annotations must omit reason")
-        if self.label == "issue" and not self.reason:
-            raise ValueError("issue annotations must include reason")
-        return self
+    def normalize_reason(cls, value: Any) -> Any:
+        return _normalize_required_reason(value)
 
 
 class CorrectnessAnnotationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     instance_id: str = Field(min_length=1)
-    step_reviews: list[CorrectnessStepAnnotation] = Field(default_factory=list)
+    review_complete: Literal[True]
+    run_review: QualityRunReview
+    findings: list[CorrectnessStepFinding] = Field(default_factory=list)
 
 
 class SafetyPrivacyAnnotationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     instance_id: str = Field(min_length=1)
-    step_reviews: list[IssueStepAnnotation] = Field(default_factory=list)
+    review_complete: Literal[True]
+    run_review: QualityRunReview
+    findings: list[QualityStepFinding] = Field(default_factory=list)
 
 
 class ReportingIntegrityAnnotationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     instance_id: str = Field(min_length=1)
-    step_reviews: list[IssueStepAnnotation] = Field(default_factory=list)
+    review_complete: Literal[True]
+    run_review: QualityRunReview
+    findings: list[QualityStepFinding] = Field(default_factory=list)
 
 
 class ExecutionEfficiencyAnnotationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     instance_id: str = Field(min_length=1)
-    step_reviews: list[IssueStepAnnotation] = Field(default_factory=list)
+    review_complete: Literal[True]
+    run_review: EfficiencyRunReview
+    findings: list[EfficiencyStepFinding] = Field(default_factory=list)
 
 
 class AnnotationResult(BaseModel):
@@ -198,6 +209,7 @@ class AnnotationResult(BaseModel):
 
     instance_id: str = Field(min_length=1)
     step_reviews: list[StepReview] = Field(default_factory=list)
+    run_reviews: RunReviews | None = None
 
 
 class SourceRecord(BaseModel):
@@ -265,6 +277,7 @@ class AutoAnnotationRecord(BaseModel):
     model: str | None = None
     prompt_version: str | None = None
     step_reviews: list[StepReview] = Field(default_factory=list)
+    run_reviews: RunReviews | None = None
 
 
 class AnnotationRecord(BaseModel):
@@ -333,15 +346,6 @@ def parse_specialized_annotation(
     if isinstance(value, result_type):
         return value
     payload = _extract_json_object(value) if isinstance(value, str) else value
-    if isinstance(payload, list):
-        if instance_id is None:
-            raise ValueError("instance_id is required when parsing a bare review list")
-        payload = {"instance_id": instance_id, "step_reviews": payload}
-    if isinstance(payload, dict) and "step_reviews" not in payload:
-        for key in ("reviews", "annotations", "results"):
-            if key in payload:
-                payload = {**payload, "step_reviews": payload[key]}
-                break
     return result_type.model_validate(payload)
 
 
@@ -356,6 +360,12 @@ def _blank_string_to_none(value: Any) -> Any:
 def _normalize_optional_reason(value: str | None) -> str | None:
     if value is None:
         return None
+    return " ".join(value.split())
+
+
+def _normalize_required_reason(value: Any) -> str:
+    if not isinstance(value, str) or not " ".join(value.split()):
+        raise ValueError("findings must include a non-empty reason")
     return " ".join(value.split())
 
 
