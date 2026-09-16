@@ -144,7 +144,12 @@ class OpenCollabAgent(Agent):
         )
         command_prefix = environment_kwargs.pop("command_prefix", None)
         timeout_returncode = int(environment_kwargs.pop("timeout_returncode", -1))
-        for ignored in ("keep_image", "pull_timeout", "run_args"):
+        for ignored in (
+            "keep_image",
+            "pull_timeout",
+            "run_args",
+            "save_final_snapshot",
+        ):
             environment_kwargs.pop(ignored, None)
         if environment_kwargs:
             logging.getLogger(__name__).warning(

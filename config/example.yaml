@@ -1,5 +1,6 @@
 # traj-only: generate trajectory; review-only: annotate existing trajectories; full: both.
 mode: full
+cleanup_policy: on_success  # always, on_success, or never; full mode only
 
 generation:
   harness: mini_swe_agent  # mini_swe_agent, openhands, or opencollab
@@ -14,7 +15,8 @@ generation:
   model_kwargs:
     drop_params: true
   environment_kwargs:
-    keep_image: false
+    keep_image: true
+    save_final_snapshot: true  # mini-swe-agent Docker runs only
     cwd: /testbed
     pull_timeout: 900
   # OpenCollab-only options. Team mode records collaboration in trajectory.jsonl.
