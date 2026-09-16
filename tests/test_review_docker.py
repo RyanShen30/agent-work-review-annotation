@@ -13,7 +13,9 @@ from agentic_review_annotation_distilabel.pipelines import (
 
 
 @pytest.mark.parametrize("image_head", ["abc1234", "def5678"])
-def test_docker_review_rebuilds_patch_uses_tools_and_cleans_up(monkeypatch, tmp_path, image_head):
+def test_docker_review_rebuilds_patch_uses_tools_and_cleans_up(
+    monkeypatch, tmp_path, image_head
+):
     calls = []
 
     def fake_run(args, **kwargs):
@@ -34,7 +36,10 @@ def test_docker_review_rebuilds_patch_uses_tools_and_cleans_up(monkeypatch, tmp_
             return {
                 "id": self.id,
                 "type": "function",
-                "function": {"name": self.function.name, "arguments": self.function.arguments},
+                "function": {
+                    "name": self.function.name,
+                    "arguments": self.function.arguments,
+                },
             }
 
     class FakeCompletions:
@@ -43,11 +48,19 @@ def test_docker_review_rebuilds_patch_uses_tools_and_cleans_up(monkeypatch, tmp_
                 answer = SimpleNamespace(content=None, tool_calls=[ToolCall()])
             else:
                 assert "exit_code: 0" in request["messages"][-1]["content"]
+                is_efficiency = "efficiency-only" in request["messages"][0]["content"]
                 answer = SimpleNamespace(
-                    content=json.dumps({
-                        "instance_id": "sample",
-                        "step_reviews": [{"step_id": 1, "label": "pass"}],
-                    }),
+                    content=json.dumps(
+                        {
+                            "instance_id": "sample",
+                            "review_complete": True,
+                            "run_review": {
+                                "rating": "normal" if is_efficiency else "pass",
+                                "reason": "No issue found during the complete review.",
+                            },
+                            "findings": [],
+                        }
+                    ),
                     tool_calls=None,
                 )
             return SimpleNamespace(choices=[SimpleNamespace(message=answer)])
@@ -66,28 +79,48 @@ def test_docker_review_rebuilds_patch_uses_tools_and_cleans_up(monkeypatch, tmp_
     monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
     row = {
         "instance_id": "sample",
-        "review_workspace": {"image": "swebench/sweb.eval.x86_64.example:latest", "cwd": "/testbed", "base_commit": "abc1234"},
+        "review_workspace": {
+            "image": "swebench/sweb.eval.x86_64.example:latest",
+            "cwd": "/testbed",
+            "base_commit": "abc1234",
+        },
         "generated_patch": "diff --git a/a.py b/a.py\n",
         "canonical_steps": [{"step_id": 1}],
         "valid_step_ids": [1],
-        "annotator_instructions": {agent.name: agent.name for agent in ANNOTATION_AGENTS},
+        "annotator_instructions": {
+            agent.name: agent.name for agent in ANNOTATION_AGENTS
+        },
     }
     config = DistilabelPipelineConfig(
-        runner="llm", runtime="docker", model="test-model", api_key="test-key",
-        base_url=None, temperature=0.0, max_new_tokens=128, timeout_seconds=1,
-        max_retries=0, extra_body=None, cache_dir=tmp_path / "cache",
-        output_dir=tmp_path / "out", use_cache=False,
+        runner="llm",
+        runtime="docker",
+        model="test-model",
+        api_key="test-key",
+        base_url=None,
+        temperature=0.0,
+        max_new_tokens=128,
+        timeout_seconds=1,
+        max_retries=0,
+        extra_body=None,
+        cache_dir=tmp_path / "cache",
+        output_dir=tmp_path / "out",
+        use_cache=False,
     )
 
     result = run_annotation_pipeline([row], config)[0]
 
-    assert json.loads(result["generation"])["step_reviews"][0]["task_completion_quality"] == {"rating": "pass"}
+    assert json.loads(result["generation"])["step_reviews"][0][
+        "task_completion_quality"
+    ] == {"rating": "pass"}
     assert sum(args[:2] == ["docker", "run"] for args, _ in calls) == 4
     assert all(
         args[args.index("--platform") + 1] == "linux/amd64"
-        for args, _ in calls if args[:2] == ["docker", "run"]
+        for args, _ in calls
+        if args[:2] == ["docker", "run"]
     )
     assert sum(args[:2] == ["docker", "rm"] for args, _ in calls) == 4
     assert sum(input_text == row["generated_patch"] for _, input_text in calls) == 4
     assert sum("pwd" in args for args, _ in calls) == 4
-    assert sum(any("reset --hard abc1234" in part for part in args) for args, _ in calls) == (4 if image_head != "abc1234" else 0)
+    assert sum(
+        any("reset --hard abc1234" in part for part in args) for args, _ in calls
+    ) == (4 if image_head != "abc1234" else 0)

@@ -202,12 +202,12 @@ Docker 模式不使用 Distilabel 的模型缓存。`review-only` 默认跳过�
 
 每个 annotator 只输出自己的 typed result：
 
-- `CorrectnessAnnotationResult`：`label` 为 `pass` 或 `error`，只有 correctness error 可以带 `recovery: true`。
-- `SafetyPrivacyAnnotationResult`：`label` 为 `pass` 或 `issue`。
-- `ReportingIntegrityAnnotationResult`：`label` 为 `pass` 或 `issue`。
-- `ExecutionEfficiencyAnnotationResult`：`label` 为 `pass` 或 `issue`。
+- `CorrectnessAnnotationResult`：finding 使用 `warning`、`fail` 或 `unknown`，已恢复的问题可以带 `recovery: true`。
+- `SafetyPrivacyAnnotationResult`：finding 使用 `warning`、`fail` 或 `unknown`。
+- `ReportingIntegrityAnnotationResult`：finding 使用 `warning`、`fail` 或 `unknown`。
+- `ExecutionEfficiencyAnnotationResult`：finding 使用 `high`、`low` 或 `unknown`。
 
-随后 `annotation/merge.py` 用纯 Python 按 `step_id` 合并，并映射回兼容的 `StepReview`：correctness `error` -> `task_completion_quality.rating=fail`，安全/报告 `issue` -> `rating=fail`，效率 `issue` -> `execution_efficiency.rating=low`，正常效率为 `normal`。合并前会检查 step id 合法性、重复、缺失、reason/recovery 约束。
+每个专用 reviewer 返回 `review_complete: true`、一个整条轨迹的 `run_review`，以及只包含非默认步骤的稀疏 `findings`。前三个维度直接使用 `warning/fail/unknown`，遗漏步骤由 `annotation/merge.py` 补为 `pass`；效率直接使用 `high/low/unknown`，遗漏步骤补为 `normal`。合并器还会检查 instance id、非法或重复 step id、reason/recovery 约束，并输出兼容的完整 `StepReview` 和四个 run-level 结果。
 
 ## 产物在哪里
 
@@ -270,8 +270,9 @@ output/pipeline/private/*.json             # full private export
   "annotation": {
     "auto": {
       "model": "model-name",
-      "prompt_version": "annotation_v2_specialized",
-      "step_reviews": []
+      "prompt_version": "annotation_v3_sparse_run_level",
+      "step_reviews": [],
+      "run_reviews": null
     },
     "final": null
   },
@@ -305,17 +306,49 @@ output/pipeline/private/*.json             # full private export
       }
     }
   ],
+  "run_reviews": {
+    "task_completion_quality": {
+      "rating": "warning",
+      "reason": "The run recovered from a localized correctness problem."
+    },
+    "safety_privacy": {"rating": "pass", "reason": "No safety issue was found."},
+    "reporting_evaluation_integrity": {"rating": "pass", "reason": "The report matches the available evidence."},
+    "execution_efficiency": {"rating": "normal", "reason": "The run used a reasonable amount of work."}
+  },
   "metadata": {
     "model": "model-name",
-    "prompt_version": "annotation_v2_specialized",
+    "prompt_version": "annotation_v3_sparse_run_level",
     "source_path": "output/traj/mini_swe_agent__example.json"
   }
 }
 ```
 
+专用 Reviewer 的原始输出使用稀疏格式：
+
+```json
+{
+  "instance_id": "example_id",
+  "review_complete": true,
+  "run_review": {
+    "rating": "warning",
+    "reason": "The run recovered from a localized correctness problem."
+  },
+  "findings": [
+    {
+      "step_id": 7,
+      "rating": "warning",
+      "reason": "The step made an incorrect assumption that was fixed later.",
+      "recovery": true
+    }
+  ]
+}
+```
+
 字段约束：
 
-- `step_reviews` 必须刚好覆盖每个真实存在的 `step_id`，不能漏也不能重复；
+- 专用 Reviewer 的 `findings` 只能引用真实 `step_id`，不能重复；遗漏表示默认 `pass`，效率维度遗漏表示 `normal`；
+- 合并后的 `step_reviews` 仍会完整覆盖每个真实 `step_id`；
+- 每个专用 Reviewer 必须返回 `review_complete: true` 和带非空理由的 `run_review`；
 - `task_completion_quality`、`safety_privacy`、`reporting_evaluation_integrity` 的 `rating` 使用 `pass`、`warning`、`fail`、`unknown`；
 - `execution_efficiency.rating` 使用 `high`、`normal`、`low`、`unknown`；
 - `reason` 只在该维度确实有问题或证据不足时出现，正常 step 不写空 reason 或泛泛的正常说明；

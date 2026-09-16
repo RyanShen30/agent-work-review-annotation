@@ -15,20 +15,20 @@ from agentic_review_annotation_distilabel.adapters import (
     OpenCollabAdapter,
     OpenHandsAdapter,
 )
-from agentic_review_annotation_distilabel.annotation.prompt_builder import (
-    PROMPT_VERSION,
-    PromptBuilder,
-)
 from agentic_review_annotation_distilabel.annotation.exporter import (
     export_master,
     export_private,
     export_public,
 )
+from agentic_review_annotation_distilabel.annotation.prompt_builder import (
+    PROMPT_VERSION,
+    PromptBuilder,
+)
 from agentic_review_annotation_distilabel.annotation.schema import (
     AnnotationResult,
     MasterRecord,
-    annotation_to_dict,
     annotation_json_schema,
+    annotation_to_dict,
     parse_annotation,
     validate_annotation_against_steps,
 )
@@ -84,7 +84,9 @@ def main() -> None:
     )
     output_dir = args.output_dir or Path(paths.get("output_dir", DEFAULT_OUTPUT_DIR))
     public_dir = args.public_dir or Path(paths.get("public_dir", DEFAULT_PUBLIC_DIR))
-    private_dir = args.private_dir or Path(paths.get("private_dir", DEFAULT_PRIVATE_DIR))
+    private_dir = args.private_dir or Path(
+        paths.get("private_dir", DEFAULT_PRIVATE_DIR)
+    )
     cache_dir = args.cache_dir or Path(paths.get("cache_dir", DEFAULT_CACHE_DIR))
 
     runner = args.runner or config.get("runner") or "llm"
@@ -155,7 +157,9 @@ def main() -> None:
     )
 
     if runner == "llm" and not pipeline_config.api_key:
-        raise RuntimeError("Missing API key: export LLM_API_KEY or run with --runner mock.")
+        raise RuntimeError(
+            "Missing API key: export LLM_API_KEY or run with --runner mock."
+        )
 
     saved = run_and_save_each(rows, pipeline_config, output_dir)
     print(f"done: queued={len(rows)} saved={saved} output_dir={output_dir}")
@@ -181,7 +185,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", choices=sorted(ADAPTERS), default=None)
     parser.add_argument("--runner", choices=["llm", "mock"], default=None)
     parser.add_argument("--limit", type=int, default=None)
-    parser.add_argument("--start-index", type=int, default=0, help="Zero-based input offset.")
+    parser.add_argument(
+        "--start-index", type=int, default=0, help="Zero-based input offset."
+    )
     parser.add_argument("--model-max-new-tokens", type=int, default=None)
     parser.add_argument(
         "--disable-thinking",
@@ -272,16 +278,22 @@ def prepare_rows(
         write_record(private_path, export_private(master))
         normalized_preview_path = normalized_preview_dir / f"{sample.instance_id}.json"
         normalized_preview_path.write_text(
-            json.dumps(build_normalized_preview(normalized), ensure_ascii=False, indent=2)
+            json.dumps(
+                build_normalized_preview(normalized), ensure_ascii=False, indent=2
+            )
             + "\n",
             encoding="utf-8",
         )
 
         output_path = output_dir / f"{sample.instance_id}.json"
-        if output_path.exists() and not overwrite and is_valid_existing_result(
-            output_path,
-            sample.instance_id,
-            valid_step_ids,
+        if (
+            output_path.exists()
+            and not overwrite
+            and is_valid_existing_result(
+                output_path,
+                sample.instance_id,
+                valid_step_ids,
+            )
         ):
             annotation, metadata = load_existing_annotation(output_path)
             master = master_with_auto_annotation(
@@ -341,7 +353,9 @@ def review_workspace_from_raw(raw: dict[str, Any]) -> dict[str, Any]:
     swebench = raw.get("swebench") if isinstance(raw.get("swebench"), dict) else {}
     info = raw.get("info") if isinstance(raw.get("info"), dict) else {}
     config = info.get("config") if isinstance(info.get("config"), dict) else {}
-    environment = config.get("environment") if isinstance(config.get("environment"), dict) else {}
+    environment = (
+        config.get("environment") if isinstance(config.get("environment"), dict) else {}
+    )
     image = raw.get("image") or swebench.get("image") or environment.get("image")
     if not image and swebench.get("instance_id"):
         from agentic_review_annotation_distilabel.agents.run import swebench_image
@@ -360,7 +374,9 @@ def build_normalized_preview(normalized: dict[str, Any]) -> dict[str, Any]:
         "source_path": normalized["source_path"],
         "instance_id": normalized["instance_id"],
         "repository": normalized.get("repository"),
-        "environment_preview": preview_text(normalized.get("environment"), max_chars=2000),
+        "environment_preview": preview_text(
+            normalized.get("environment"), max_chars=2000
+        ),
         "task_preview": preview_task(normalized.get("task")),
         "generated_patch_preview": preview_text(
             normalized.get("generated_patch"),
@@ -386,7 +402,10 @@ def build_master_record(
         source = {**source, "problem_statement": sample.task}
     if not source.get("repo") and sample.repository:
         repository = sample.repository if isinstance(sample.repository, dict) else {}
-        source = {**source, "repo": repository.get("repo") or repository.get("repository")}
+        source = {
+            **source,
+            "repo": repository.get("repo") or repository.get("repository"),
+        }
     if not source.get("benchmark"):
         source = {**source, "benchmark": dataset}
 
@@ -422,7 +441,9 @@ def build_master_record(
 def build_master_evaluation(evaluation: Any) -> dict[str, Any]:
     if not isinstance(evaluation, dict):
         return {}
-    per_test_results = evaluation.get("per_test_results") or evaluation.get("tests") or []
+    per_test_results = (
+        evaluation.get("per_test_results") or evaluation.get("tests") or []
+    )
     if not isinstance(per_test_results, list):
         per_test_results = []
     return {
@@ -444,10 +465,12 @@ def master_with_auto_annotation(
     prompt_version: str | None,
 ) -> MasterRecord:
     payload = export_master(master)
+    annotation_payload = annotation_to_dict(annotation)
     payload["annotation"]["auto"] = {
         "model": model,
         "prompt_version": prompt_version,
-        "step_reviews": annotation_to_dict(annotation)["step_reviews"],
+        "step_reviews": annotation_payload["step_reviews"],
+        "run_reviews": annotation_payload.get("run_reviews"),
     }
     return MasterRecord.model_validate(payload)
 
@@ -581,11 +604,16 @@ def collect_input_paths(path: Path, dataset: str | None = None) -> list[Path]:
     return paths
 
 
-def is_valid_existing_result(path: Path, instance_id: str, valid_step_ids: list[int]) -> bool:
+def is_valid_existing_result(
+    path: Path, instance_id: str, valid_step_ids: list[int]
+) -> bool:
     try:
-        annotation, _ = load_existing_annotation(path)
+        annotation, metadata = load_existing_annotation(path)
         validate_annotation_against_steps(annotation, instance_id, valid_step_ids)
-        return True
+        return (
+            annotation.run_reviews is not None
+            and metadata.get("prompt_version") == PROMPT_VERSION
+        )
     except Exception:
         return False
 
@@ -596,6 +624,7 @@ def load_existing_annotation(path: Path) -> tuple[AnnotationResult, dict[str, An
         {
             "instance_id": payload["instance_id"],
             "step_reviews": payload.get("step_reviews", []),
+            "run_reviews": payload.get("run_reviews"),
         }
     )
     metadata = payload.get("metadata")
@@ -666,7 +695,9 @@ def save_annotation_outputs(
 
     if failures:
         joined = "\n".join(f"- {failure}" for failure in failures)
-        raise RuntimeError(f"Some annotations failed validation or generation:\n{joined}")
+        raise RuntimeError(
+            f"Some annotations failed validation or generation:\n{joined}"
+        )
 
     return saved
 
@@ -686,7 +717,9 @@ def build_extra_body(
     if enable_thinking:
         return None
 
-    is_deepseek = "deepseek" in (base_url or "").lower() or model.startswith("deepseek-")
+    is_deepseek = "deepseek" in (base_url or "").lower() or model.startswith(
+        "deepseek-"
+    )
     if disable_thinking or is_deepseek:
         return {"thinking": {"type": "disabled"}}
 

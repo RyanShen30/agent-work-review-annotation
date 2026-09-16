@@ -6,11 +6,15 @@ from typing import Any
 
 from agentic_review_annotation_distilabel.adapters.base import Sample
 from agentic_review_annotation_distilabel.annotation.annotators import ANNOTATION_AGENTS
-from agentic_review_annotation_distilabel.annotation.schema import annotation_json_schema
+from agentic_review_annotation_distilabel.annotation.schema import (
+    annotation_json_schema,
+)
 from agentic_review_annotation_distilabel.steps.base import CanonicalStep
 
-PROMPT_VERSION = "annotation_v2_specialized"
-DEFAULT_PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "annotation_v1.md"
+PROMPT_VERSION = "annotation_v3_sparse_run_level"
+DEFAULT_PROMPT_PATH = (
+    Path(__file__).resolve().parents[1] / "prompts" / "annotation_v1.md"
+)
 
 
 class PromptBuilder:
@@ -70,7 +74,9 @@ class PromptBuilder:
             payload.pop("evaluation", None)
         return payload
 
-    def build_payload(self, sample: Sample, steps: list[CanonicalStep]) -> dict[str, Any]:
+    def build_payload(
+        self, sample: Sample, steps: list[CanonicalStep]
+    ) -> dict[str, Any]:
         return {
             "instance_id": sample.instance_id,
             "repository": sample.repository,
@@ -81,7 +87,9 @@ class PromptBuilder:
             "canonical_steps": [step.to_dict() for step in steps],
         }
 
-    def build_model_payload(self, sample: Sample, steps: list[CanonicalStep]) -> dict[str, Any]:
+    def build_model_payload(
+        self, sample: Sample, steps: list[CanonicalStep]
+    ) -> dict[str, Any]:
         if not self.compact_for_model:
             return self.build_payload(sample, steps)
 

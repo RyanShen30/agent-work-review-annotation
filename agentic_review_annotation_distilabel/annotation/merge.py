@@ -6,11 +6,14 @@ from typing import Any
 from agentic_review_annotation_distilabel.annotation.schema import (
     AnnotationResult,
     CorrectnessAnnotationResult,
+    CorrectnessStepFinding,
     DimensionReview,
+    EfficiencyStepFinding,
     ExecutionEfficiencyAnnotationResult,
     ExecutionEfficiencyReview,
-    IssueStepAnnotation,
+    QualityStepFinding,
     ReportingIntegrityAnnotationResult,
+    RunReviews,
     SafetyPrivacyAnnotationResult,
     TaskCompletionQualityReview,
 )
@@ -37,16 +40,16 @@ def merge_specialized_annotations(
         "execution_efficiency": execution_efficiency,
     }.items():
         _validate_result_identity(name, result, instance_id)
-        _validate_step_coverage(
+        _validate_findings(
             name,
-            [item.step_id for item in result.step_reviews],
+            [item.step_id for item in result.findings],
             expected_set,
         )
 
-    correctness_by_step = {item.step_id: item for item in correctness.step_reviews}
-    safety_by_step = {item.step_id: item for item in safety_privacy.step_reviews}
-    reporting_by_step = {item.step_id: item for item in reporting_integrity.step_reviews}
-    efficiency_by_step = {item.step_id: item for item in execution_efficiency.step_reviews}
+    correctness_by_step = {item.step_id: item for item in correctness.findings}
+    safety_by_step = {item.step_id: item for item in safety_privacy.findings}
+    reporting_by_step = {item.step_id: item for item in reporting_integrity.findings}
+    efficiency_by_step = {item.step_id: item for item in execution_efficiency.findings}
 
     return AnnotationResult(
         instance_id=instance_id,
@@ -54,16 +57,24 @@ def merge_specialized_annotations(
             {
                 "step": step_id,
                 "task_completion_quality": _merge_correctness(
-                    correctness_by_step[step_id]
+                    correctness_by_step.get(step_id)
                 ),
-                "safety_privacy": _merge_issue_dimension(safety_by_step[step_id]),
-                "reporting_evaluation_integrity": _merge_issue_dimension(
-                    reporting_by_step[step_id]
+                "safety_privacy": _merge_quality_dimension(safety_by_step.get(step_id)),
+                "reporting_evaluation_integrity": _merge_quality_dimension(
+                    reporting_by_step.get(step_id)
                 ),
-                "execution_efficiency": _merge_efficiency(efficiency_by_step[step_id]),
+                "execution_efficiency": _merge_efficiency(
+                    efficiency_by_step.get(step_id)
+                ),
             }
             for step_id in expected
         ],
+        run_reviews=RunReviews(
+            task_completion_quality=correctness.run_review,
+            safety_privacy=safety_privacy.run_review,
+            reporting_evaluation_integrity=reporting_integrity.run_review,
+            execution_efficiency=execution_efficiency.run_review,
+        ),
     )
 
 
@@ -74,7 +85,7 @@ def _validate_result_identity(name: str, result: Any, instance_id: str) -> None:
         )
 
 
-def _validate_step_coverage(name: str, step_ids: list[int], expected: set[int]) -> None:
+def _validate_findings(name: str, step_ids: list[int], expected: set[int]) -> None:
     counts = Counter(step_ids)
     duplicates = sorted(step_id for step_id, count in counts.items() if count > 1)
     if duplicates:
@@ -89,31 +100,33 @@ def _validate_step_coverage(name: str, step_ids: list[int], expected: set[int]) 
             f"{name} result references unknown step ids: "
             + ", ".join(str(step_id) for step_id in invalid)
         )
-    missing = sorted(expected - seen)
-    if missing:
-        raise ValueError(
-            f"{name} result is missing step ids: "
-            + ", ".join(str(step_id) for step_id in missing)
-        )
 
 
-def _merge_correctness(item: Any) -> TaskCompletionQualityReview:
+def _merge_correctness(
+    item: CorrectnessStepFinding | None,
+) -> TaskCompletionQualityReview:
+    if item is None:
+        return TaskCompletionQualityReview(rating="pass")
     return TaskCompletionQualityReview(
-        rating="fail" if item.label == "error" else "pass",
+        rating=item.rating,
         reason=item.reason,
         recovery=item.recovery,
     )
 
 
-def _merge_issue_dimension(item: IssueStepAnnotation) -> DimensionReview:
+def _merge_quality_dimension(item: QualityStepFinding | None) -> DimensionReview:
+    if item is None:
+        return DimensionReview(rating="pass")
     return DimensionReview(
-        rating="fail" if item.label == "issue" else "pass",
+        rating=item.rating,
         reason=item.reason,
     )
 
 
-def _merge_efficiency(item: IssueStepAnnotation) -> ExecutionEfficiencyReview:
+def _merge_efficiency(item: EfficiencyStepFinding | None) -> ExecutionEfficiencyReview:
+    if item is None:
+        return ExecutionEfficiencyReview(rating="normal")
     return ExecutionEfficiencyReview(
-        rating="low" if item.label == "issue" else "normal",
+        rating=item.rating,
         reason=item.reason,
     )

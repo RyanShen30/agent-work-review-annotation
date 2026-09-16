@@ -2,7 +2,15 @@ from agentic_review_annotation_distilabel.annotation.exporter import (
     export_private,
     export_public,
 )
-from agentic_review_annotation_distilabel.annotation.schema import MasterRecord
+from agentic_review_annotation_distilabel.annotation.schema import (
+    AnnotationResult,
+    MasterRecord,
+)
+from agentic_review_annotation_distilabel.run import (
+    is_valid_existing_result,
+    load_existing_annotation,
+    master_with_auto_annotation,
+)
 
 
 def test_public_benchmark_task_hides_annotation_and_oracle():
@@ -103,3 +111,69 @@ def test_public_annotation_release_can_include_final_reviews():
 
     assert public["mode"] == "annotation_release"
     assert public["final_annotation"]["step_reviews"][0]["step"] == 1
+
+
+def test_master_persists_auto_run_reviews():
+    annotation = AnnotationResult.model_validate(
+        {
+            "instance_id": "sample",
+            "step_reviews": [],
+            "run_reviews": {
+                "task_completion_quality": {"rating": "pass", "reason": "Correct run."},
+                "safety_privacy": {"rating": "pass", "reason": "Safe run."},
+                "reporting_evaluation_integrity": {
+                    "rating": "pass",
+                    "reason": "Accurate report.",
+                },
+                "execution_efficiency": {
+                    "rating": "normal",
+                    "reason": "Normal effort.",
+                },
+            },
+        }
+    )
+
+    updated = master_with_auto_annotation(
+        master=MasterRecord(instance_id="sample"),
+        annotation=annotation,
+        model="review-model",
+        prompt_version="annotation_v3_sparse_run_level",
+    )
+
+    assert updated.annotation.auto.run_reviews is not None
+    assert updated.annotation.auto.run_reviews.execution_efficiency.rating == "normal"
+
+
+def test_existing_annotation_requires_and_loads_current_run_reviews(tmp_path):
+    path = tmp_path / "sample.json"
+    path.write_text(
+        """{
+  "instance_id": "sample",
+  "step_reviews": [{
+    "step": 1,
+    "task_completion_quality": {"rating": "pass"},
+    "safety_privacy": {"rating": "pass"},
+    "reporting_evaluation_integrity": {"rating": "pass"},
+    "execution_efficiency": {"rating": "normal"}
+  }],
+  "run_reviews": {
+    "task_completion_quality": {"rating": "pass", "reason": "Correct run."},
+    "safety_privacy": {"rating": "pass", "reason": "Safe run."},
+    "reporting_evaluation_integrity": {"rating": "pass", "reason": "Accurate report."},
+    "execution_efficiency": {"rating": "normal", "reason": "Normal effort."}
+  },
+  "metadata": {"prompt_version": "annotation_v3_sparse_run_level"}
+}\n""",
+        encoding="utf-8",
+    )
+
+    annotation, _ = load_existing_annotation(path)
+
+    assert annotation.run_reviews is not None
+    assert is_valid_existing_result(path, "sample", [1])
+
+    stale = path.read_text(encoding="utf-8").replace(
+        "annotation_v3_sparse_run_level", "annotation_v2_specialized"
+    )
+    path.write_text(stale, encoding="utf-8")
+    assert not is_valid_existing_result(path, "sample", [1])
