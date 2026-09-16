@@ -65,6 +65,8 @@ output/pipeline/private/                    # full private export
 
 无效的模型输出会写入对应 annotation 目录下的 `_failed/`。
 
+mini-swe-agent 的 Docker 运行可通过 `generation.environment_kwargs.save_final_snapshot: true` 在 coding 容器删除前保存最终镜像。Docker Reviewer 优先从该快照创建四个互相隔离的临时容器；旧轨迹或快照不可用时，回退到基础镜像加最终 patch。`full` 模式的 `cleanup_policy: on_success` 会在 review 成功后删除轨迹中登记的最终快照和基础镜像，失败时保留用于调试。
+
 ## 输出格式
 
 `output/*/normalized/` 中的 master record 是唯一事实源，核心结构是：

@@ -36,7 +36,7 @@ class AgentConfig(BaseModel):
     benchmark_instance: dict[str, Any] | None = None
 
     @model_validator(mode="after")
-    def require_docker_image(self) -> "AgentConfig":
+    def require_docker_image(self) -> AgentConfig:
         if self.runtime == "docker" and not (self.docker_image or self.benchmark_path):
             raise ValueError("docker runtime requires docker_image or benchmark_path")
         return self
@@ -54,19 +54,27 @@ class Agent(ABC):
 
     def save(self, problem: str, result: dict[str, Any]) -> Path:
         if self.config.runtime == "docker":
-            default_cwd = "/workspace" if self.harness_name == "mini_swe_agent" else "/testbed"
-            result["review_workspace"] = {
-                "image": self.config.docker_image,
-                "cwd": "/testbed" if self.harness_name == "openhands" else self.config.environment_kwargs.get("cwd", default_cwd),
-                "base_commit": self.config.base_commit,
-            }
+            default_cwd = (
+                "/workspace" if self.harness_name == "mini_swe_agent" else "/testbed"
+            )
+            review_workspace = dict(result.get("review_workspace") or {})
+            review_workspace.setdefault("image", self.config.docker_image)
+            review_workspace.setdefault(
+                "cwd",
+                "/testbed"
+                if self.harness_name == "openhands"
+                else self.config.environment_kwargs.get("cwd", default_cwd),
+            )
+            review_workspace.setdefault("base_commit", self.config.base_commit)
+            result["review_workspace"] = review_workspace
         output_dir = self.config.output_dir
         if not output_dir.is_absolute():
             output_dir = PROJECT_ROOT / output_dir
         output_dir.mkdir(parents=True, exist_ok=True)
         path = output_dir / self.output_name(problem)
         path.write_text(
-            json.dumps(drop_secrets(result), ensure_ascii=False, indent=2, default=str) + "\n"
+            json.dumps(drop_secrets(result), ensure_ascii=False, indent=2, default=str)
+            + "\n"
         )
         return path
 

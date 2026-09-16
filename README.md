@@ -178,7 +178,7 @@ canonical sample + canonical steps
 
 ### Review 运行环境
 
-配置未指定 `review.runtime` 时默认为 `local`，沿用现有的 Distilabel 纯文本标注；两个 review 脚本当前都显式选用 `docker`。Docker 模式下，每个 annotator 都会从 coding agent 记录的镜像启动独立容器，在仓库中应用最终 `generated_patch`，并可通过 `run_command` 检索代码、编写临时测试和运行命令。容器在该 annotator 完成后删除；宿主仓库不会挂载，容器网络默认关闭。
+配置未指定 `review.runtime` 时默认为 `local`，沿用现有的 Distilabel 纯文本标注；两个 review 脚本当前都显式选用 `docker`。mini-swe-agent 的 Docker 运行结束后会先通过 `docker commit` 保存最终仓库快照，再删除 coding 容器。每个 annotator 从同一快照分别启动独立临时容器，并可通过 `run_command` 检索代码、编写临时测试和运行命令。Reviewer 容器在该 annotator 完成后删除；宿主仓库不会挂载，容器网络默认关闭。
 
 ```yaml
 review:
@@ -190,11 +190,21 @@ review:
   # docker_platform: linux/amd64  # 其他单架构镜像可显式指定
 ```
 
-新生成的 Docker 轨迹会保存镜像、工作目录和 base commit。旧 SWE-bench 轨迹会尝试从已有字段恢复；无法确定镜像时需设置 `review.docker_image`。Docker 模式需要可用的 Docker daemon 和支持工具调用的 OpenAI 兼容模型。为了重复 review 时避免重新拉取大镜像，可将 `generation.environment_kwargs.keep_image` 设为 `true`；无需保留运行中的 coding 容器。重建使用最终 patch，因此未包含在 patch 中的未跟踪文件或中间步骤状态不会出现在 reviewer 的仓库中。
+新生成的 mini-swe-agent Docker 轨迹会在 `review_workspace` 中保存基础镜像、工作目录、base commit、最终快照标签和不可变 image ID。最终快照包含未跟踪文件、运行时安装的依赖和其他未进入 patch 的容器状态。Reviewer 优先使用该快照；快照不存在的旧轨迹会回退到“基础镜像 + `generated_patch`”重建。无法确定任何镜像时需设置 `review.docker_image`。
 
 镜像名包含 `.x86_64.` 时，review 自动以 `linux/amd64` 启动；其他跨平台镜像可用 `review.docker_platform` 指定平台。
 
-镜像若包含晚于任务 `base_commit` 的初始化提交，review 会在临时容器中先回到 `base_commit`，再应用轨迹中的最终 diff；这不会修改镜像或宿主仓库。
+使用回退重建时，如果基础镜像包含晚于任务 `base_commit` 的初始化提交，review 会在临时容器中先回到 `base_commit`，再应用轨迹中的最终 diff；这不会修改镜像或宿主仓库。
+
+`full` 模式默认使用 `cleanup_policy: on_success`：四个 Reviewer 全部完成后，按“最终快照在前、基础镜像在后”的顺序删除本次轨迹声明的受管镜像；review 失败时保留镜像以便排查。可选值为 `always`、`on_success`、`never`。`traj-only` 和 `review-only` 不自动删除镜像，便于分阶段运行和重复标注。
+
+```yaml
+cleanup_policy: on_success
+generation:
+  environment_kwargs:
+    keep_image: true
+    save_final_snapshot: true
+```
 
 Docker 模式不使用 Distilabel 的模型缓存。`review-only` 默认跳过已有 annotation，使用 `--overwrite` 可重跑；`full` 每次都会重跑 review，即使复用了已有轨迹。
 

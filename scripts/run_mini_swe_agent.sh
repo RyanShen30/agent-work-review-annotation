@@ -15,7 +15,8 @@ STEP_LIMIT=50
 COST_LIMIT=3.0
 COMMAND_TIMEOUT=120
 DROP_PARAMS=true
-KEEP_IMAGE=false
+KEEP_IMAGE=true
+SAVE_FINAL_SNAPSHOT=true
 CWD=/testbed
 PULL_TIMEOUT=900
 
@@ -31,5 +32,6 @@ exec .venv/bin/python main.py --config "$CONFIG" --mode traj-only \
   --set generation.command_timeout="$COMMAND_TIMEOUT" \
   --set generation.model_kwargs.drop_params="$DROP_PARAMS" \
   --set generation.environment_kwargs.keep_image="$KEEP_IMAGE" \
+  --set generation.environment_kwargs.save_final_snapshot="$SAVE_FINAL_SNAPSHOT" \
   --set generation.environment_kwargs.cwd="$CWD" \
   --set generation.environment_kwargs.pull_timeout="$PULL_TIMEOUT"

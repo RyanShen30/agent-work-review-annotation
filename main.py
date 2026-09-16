@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import json
 import os
 import subprocess
 import sys
@@ -14,23 +15,38 @@ ROOT = Path(__file__).resolve().parent
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run trajectory generation, review, or both.")
+    parser = argparse.ArgumentParser(
+        description="Run trajectory generation, review, or both."
+    )
     parser.add_argument("--config", type=Path, default=ROOT / "config" / "example.yaml")
     parser.add_argument("--mode", choices=["traj-only", "review-only", "full"])
-    parser.add_argument("--input", type=Path, help="Trajectory file/directory for review-only mode.")
-    parser.add_argument("--instance", help="Benchmark row index or instance_id override.")
-    parser.add_argument("--runner", choices=["llm", "mock"], help="Review runner override.")
-    parser.add_argument("--overwrite", action="store_true", help="Re-run review for existing annotations.")
+    parser.add_argument(
+        "--input", type=Path, help="Trajectory file/directory for review-only mode."
+    )
+    parser.add_argument(
+        "--instance", help="Benchmark row index or instance_id override."
+    )
+    parser.add_argument(
+        "--runner", choices=["llm", "mock"], help="Review runner override."
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Re-run review for existing annotations.",
+    )
     parser.add_argument("--set", action="append", default=[], metavar="PATH=VALUE")
     args = parser.parse_args()
 
     config = yaml.safe_load(args.config.read_text(encoding="utf-8")) or {}
     apply_overrides(config, args.set)
+    cleanup_policy = config.get("cleanup_policy", "on_success")
+    validate_cleanup_policy(cleanup_policy)
     config_path = effective_config(config, args.config, bool(args.set))
     mode = args.mode or config.get("mode", "full")
     env = model_env()
 
     trajectory: Path | None = None
+    generated_trajectories: list[Path] = []
     if mode in {"traj-only", "full"}:
         generation = config.get("generation", {})
         harness = generation.get("harness", "mini_swe_agent")
@@ -52,40 +68,77 @@ def main() -> None:
             / "bin"
             / "python"
         )
-        output_dir = ROOT / "output" / ("traj" if mode == "traj-only" else "pipeline/traj")
+        output_dir = (
+            ROOT / "output" / ("traj" if mode == "traj-only" else "pipeline/traj")
+        )
         command = [
-            str(python), "-m", "agentic_review_annotation_distilabel.agents.run",
-            "--config", str(config_path), "--output-dir", str(output_dir),
+            str(python),
+            "-m",
+            "agentic_review_annotation_distilabel.agents.run",
+            "--config",
+            str(config_path),
+            "--output-dir",
+            str(output_dir),
         ]
         if args.instance is not None:
             command += ["--instance", args.instance]
         output = run(command, env)
-        selector = args.instance if args.instance is not None else generation.get("instance")
+        generated_trajectories = trajectory_paths_from_output(output, output_dir)
+        selector = (
+            args.instance if args.instance is not None else generation.get("instance")
+        )
         if str(selector) == "-1":
             trajectory = output_dir
         else:
             trajectory = Path(output.splitlines()[-1]) if output else None
-            if trajectory is None or not trajectory.is_file() or trajectory.parent != output_dir:
-                raise FileNotFoundError(f"trajectory was not created under {output_dir}")
+            if (
+                trajectory is None
+                or not trajectory.is_file()
+                or trajectory.parent != output_dir
+            ):
+                raise FileNotFoundError(
+                    f"trajectory was not created under {output_dir}"
+                )
 
     if mode in {"review-only", "full"}:
         base = ROOT / "output" / ("annotation" if mode == "review-only" else "pipeline")
-        review_input = args.input or trajectory or Path(config.get("review", {}).get("input", ROOT / "output/traj"))
+        review_input = (
+            args.input
+            or trajectory
+            or Path(config.get("review", {}).get("input", ROOT / "output/traj"))
+        )
         command = [
-            sys.executable, "-m", "agentic_review_annotation_distilabel.run",
-            "--config", str(config_path), "--input", str(review_input),
-            "--output-dir", str(base / "annotation"),
-            "--normalized-dir", str(base / "normalized"),
-            "--normalized-preview-dir", str(base / "preview"),
-            "--public-dir", str(base / "public"),
-            "--private-dir", str(base / "private"),
-            "--cache-dir", str(base / "cache"),
+            sys.executable,
+            "-m",
+            "agentic_review_annotation_distilabel.run",
+            "--config",
+            str(config_path),
+            "--input",
+            str(review_input),
+            "--output-dir",
+            str(base / "annotation"),
+            "--normalized-dir",
+            str(base / "normalized"),
+            "--normalized-preview-dir",
+            str(base / "preview"),
+            "--public-dir",
+            str(base / "public"),
+            "--private-dir",
+            str(base / "private"),
+            "--cache-dir",
+            str(base / "cache"),
         ]
         if mode == "full" or args.overwrite:
             command += ["--overwrite"]
         if args.runner:
             command += ["--runner", args.runner]
-        run(command, env)
+        review_succeeded = False
+        try:
+            run(command, env)
+            review_succeeded = True
+        finally:
+            if mode == "full" and should_cleanup(cleanup_policy, review_succeeded):
+                cleanup_docker_images(generated_trajectories)
 
 
 def apply_overrides(config: dict, overrides: list[str]) -> None:
@@ -103,10 +156,9 @@ def apply_overrides(config: dict, overrides: list[str]) -> None:
 def effective_config(config: dict, original: Path, changed: bool) -> Path:
     if not changed:
         return original
-    handle = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
-    yaml.safe_dump(config, handle)
-    handle.close()
-    path = Path(handle.name)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as handle:
+        yaml.safe_dump(config, handle)
+        path = Path(handle.name)
     atexit.register(path.unlink, missing_ok=True)
     return path
 
@@ -118,8 +170,75 @@ def model_env() -> dict[str, str]:
     return env
 
 
+def trajectory_paths_from_output(output: str, output_dir: Path) -> list[Path]:
+    paths: list[Path] = []
+    for line in output.splitlines():
+        candidate = Path(line.strip())
+        if candidate.is_file() and candidate.parent == output_dir:
+            paths.append(candidate)
+    return list(dict.fromkeys(paths))
+
+
+def should_cleanup(policy: str, succeeded: bool) -> bool:
+    validate_cleanup_policy(policy)
+    return policy == "always" or (policy == "on_success" and succeeded)
+
+
+def validate_cleanup_policy(policy: str) -> None:
+    if policy not in {"always", "on_success", "never"}:
+        raise ValueError("cleanup_policy must be one of: always, on_success, never")
+
+
+def cleanup_docker_images(trajectories: list[Path]) -> None:
+    snapshot_images: list[str] = []
+    other_images: list[str] = []
+    base_images: list[str] = []
+    for path in trajectories:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError):
+            continue
+        workspace = payload.get("review_workspace")
+        if not isinstance(workspace, dict):
+            continue
+        managed = workspace.get("cleanup_images")
+        if not isinstance(managed, list):
+            continue
+        managed_images = [
+            image for image in managed if isinstance(image, str) and image
+        ]
+        snapshot_image = workspace.get("snapshot_image")
+        base_image = workspace.get("image")
+        for image in managed_images:
+            if image == snapshot_image:
+                snapshot_images.append(image)
+            elif image == base_image:
+                base_images.append(image)
+            else:
+                other_images.append(image)
+
+    images = dict.fromkeys(snapshot_images + other_images + base_images)
+    for image in images:
+        result = subprocess.run(
+            ["docker", "image", "rm", "-f", image],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode and "No such image" not in result.stderr:
+            print(f"warning: could not remove image {image}: {result.stderr.strip()}")
+
+
 def run(command: list[str], env: dict[str, str]) -> str:
-    result = subprocess.run(command, cwd=ROOT, env=env, text=True, capture_output=True)
+    result = subprocess.run(
+        command,
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
     if result.stdout:
         print(result.stdout, end="")
     if result.returncode:

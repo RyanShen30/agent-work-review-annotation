@@ -15,7 +15,8 @@ STEP_LIMIT=50
 COST_LIMIT=3.0
 COMMAND_TIMEOUT=120
 DROP_PARAMS=true
-KEEP_IMAGE=false
+KEEP_IMAGE=true
+SAVE_FINAL_SNAPSHOT=true
 CWD=/testbed
 PULL_TIMEOUT=900
 
@@ -34,6 +35,7 @@ MAX_TASK_CHARS=12000
 MAX_PATCH_CHARS=20000
 MAX_STEP_CHARS=6000
 MAX_TOTAL_STEP_CHARS=60000
+CLEANUP_POLICY=on_success
 
 exec .venv/bin/python main.py --config "$CONFIG" --mode full \
   --set generation.harness="$HARNESS" \
@@ -47,6 +49,7 @@ exec .venv/bin/python main.py --config "$CONFIG" --mode full \
   --set generation.command_timeout="$COMMAND_TIMEOUT" \
   --set generation.model_kwargs.drop_params="$DROP_PARAMS" \
   --set generation.environment_kwargs.keep_image="$KEEP_IMAGE" \
+  --set generation.environment_kwargs.save_final_snapshot="$SAVE_FINAL_SNAPSHOT" \
   --set generation.environment_kwargs.cwd="$CWD" \
   --set generation.environment_kwargs.pull_timeout="$PULL_TIMEOUT" \
   --set review.dataset="$DATASET" \
@@ -62,4 +65,5 @@ exec .venv/bin/python main.py --config "$CONFIG" --mode full \
   --set review.prompt_budget.max_task_chars="$MAX_TASK_CHARS" \
   --set review.prompt_budget.max_patch_chars="$MAX_PATCH_CHARS" \
   --set review.prompt_budget.max_step_chars="$MAX_STEP_CHARS" \
-  --set review.prompt_budget.max_total_step_chars="$MAX_TOTAL_STEP_CHARS"
+  --set review.prompt_budget.max_total_step_chars="$MAX_TOTAL_STEP_CHARS" \
+  --set cleanup_policy="$CLEANUP_POLICY"
