@@ -15,7 +15,7 @@ from agentic_review_annotation_distilabel.evidence import (
 )
 from agentic_review_annotation_distilabel.steps.base import CanonicalStep
 
-PROMPT_VERSION = "annotation_v5_deterministic_evidence"
+PROMPT_VERSION = "annotation_v6_reviewer_calibration"
 DEFAULT_PROMPT_PATH = (
     Path(__file__).resolve().parents[1] / "prompts" / "annotation_v1.md"
 )

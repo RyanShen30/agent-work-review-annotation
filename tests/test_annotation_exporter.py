@@ -2,6 +2,9 @@ from agentic_review_annotation_distilabel.annotation.exporter import (
     export_private,
     export_public,
 )
+from agentic_review_annotation_distilabel.annotation.prompt_builder import (
+    PROMPT_VERSION,
+)
 from agentic_review_annotation_distilabel.annotation.schema import (
     AnnotationResult,
     MasterRecord,
@@ -143,7 +146,7 @@ def test_master_persists_auto_run_reviews():
         master=MasterRecord(instance_id="sample"),
         annotation=annotation,
         model="review-model",
-        prompt_version="annotation_v5_deterministic_evidence",
+        prompt_version=PROMPT_VERSION,
     )
 
     assert updated.annotation.auto.run_reviews is not None
@@ -168,7 +171,7 @@ def test_existing_annotation_requires_and_loads_current_run_reviews(tmp_path):
     "reporting_evaluation_integrity": {"rating": "pass", "reason": "Accurate report."},
     "execution_efficiency": {"rating": "high", "reason": "No efficiency issue."}
   },
-  "metadata": {"prompt_version": "annotation_v5_deterministic_evidence"}
+  "metadata": {"prompt_version": "annotation_v6_reviewer_calibration"}
 }\n""",
         encoding="utf-8",
     )
@@ -179,7 +182,7 @@ def test_existing_annotation_requires_and_loads_current_run_reviews(tmp_path):
     assert is_valid_existing_result(path, "sample", [1])
 
     stale = path.read_text(encoding="utf-8").replace(
-        "annotation_v5_deterministic_evidence", "annotation_v2_specialized"
+        "annotation_v6_reviewer_calibration", "annotation_v2_specialized"
     )
     path.write_text(stale, encoding="utf-8")
     assert not is_valid_existing_result(path, "sample", [1])

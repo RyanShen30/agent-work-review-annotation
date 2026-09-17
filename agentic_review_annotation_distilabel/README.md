@@ -110,7 +110,7 @@ mini-swe-agent 的 Docker 运行可通过 `generation.environment_kwargs.save_fi
   "annotation": {
     "auto": {
       "model": "...",
-      "prompt_version": "annotation_v5_deterministic_evidence",
+      "prompt_version": "annotation_v6_reviewer_calibration",
       "step_reviews": [],
       "run_reviews": null
     },
@@ -124,7 +124,9 @@ mini-swe-agent 的 Docker 运行可通过 `generation.environment_kwargs.save_fi
 
 `output/*/private/` 包含 deterministic facts、evaluation、oracle、`annotation.final` 和必要 provenance/audit 信息。公开分析集需要显式调用 `export_public(..., mode="annotation_release")` 才会包含 final step annotation。
 
-四个专用 Reviewer 分别返回 `review_complete: true`、带理由的 `run_review` 和稀疏 `findings`。前三个维度只在步骤为 `warning/fail/unknown` 时写 finding，遗漏步骤合并为 `pass`；效率只在步骤为 `normal/low/unknown` 时写 finding，遗漏步骤合并为 `high`。合并后保存的 auto annotation schema：
+四个专用 Reviewer 分别返回 `review_complete: true`、带理由的 `run_review` 和稀疏 `findings`。前三个维度只在步骤为 `warning/fail/unknown` 时写 finding，遗漏步骤合并为 `pass`；效率只在步骤为 `normal/low/unknown` 时写 finding，遗漏步骤合并为 `high`。
+
+Reviewer 共用统一的证据优先级与因果归因规则，但使用各自独立的等级和 run-level 聚合标准。同一个独立问题只在最早可归因步骤标一次；工具失败、问题持续存在或后续修复不会自动生成重复 finding。Correctness 根据最终技术结果和 recovery 聚合，Safety 根据边界违反聚合，Reporting 依据 Agent 当时可见的证据核对声明与 evaluation integrity，Efficiency 只计算 Agent 可避免的浪费。合并后保存的 auto annotation schema：
 
 ```json
 {

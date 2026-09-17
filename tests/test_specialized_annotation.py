@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -6,7 +7,10 @@ from agentic_review_annotation_distilabel.annotation.annotators import ANNOTATIO
 from agentic_review_annotation_distilabel.annotation.merge import (
     merge_specialized_annotations,
 )
-from agentic_review_annotation_distilabel.annotation.prompt_builder import PromptBuilder
+from agentic_review_annotation_distilabel.annotation.prompt_builder import (
+    PROMPT_VERSION,
+    PromptBuilder,
+)
 from agentic_review_annotation_distilabel.annotation.schema import (
     CorrectnessAnnotationResult,
     ExecutionEfficiencyAnnotationResult,
@@ -20,6 +24,7 @@ from agentic_review_annotation_distilabel.pipelines import (
 from agentic_review_annotation_distilabel.pipelines.distilabel_pipeline import (
     _merge_annotator_generations,
 )
+from agentic_review_annotation_distilabel.steps.base import CanonicalStep
 
 
 def test_merges_sparse_specialized_results_into_dense_step_and_run_reviews():
@@ -195,22 +200,20 @@ def test_rejects_invalid_specialized_outputs_before_merge():
 
 
 def test_prompt_builder_creates_four_dedicated_instructions():
-    class Sample:
-        instance_id = "sample"
-        repository = {"repo": "example/repo"}
-        environment = {"image": "example:latest"}
-        task = "Fix the bug."
-        evaluation = {"resolved": True, "eval_logs": "private"}
-        patch = "diff --git a/a.py b/a.py"
+    sample = SimpleNamespace(
+        instance_id="sample",
+        repository={"repo": "example/repo"},
+        environment={"image": "example:latest"},
+        task="Fix the bug.",
+        evaluation={"resolved": True, "eval_logs": "private"},
+        patch="diff --git a/a.py b/a.py",
+    )
+    step = CanonicalStep(
+        step_id=1,
+        content={"type": "agent_turn", "agent_message": {"content": "Done."}},
+    )
 
-    class Step:
-        step_id = 1
-        content = {"type": "agent_turn", "agent_message": {"content": "Done."}}
-
-        def to_dict(self):
-            return {"step_id": self.step_id, "content": self.content}
-
-    instructions = PromptBuilder().build_annotator_instructions(Sample(), [Step()])
+    instructions = PromptBuilder().build_annotator_instructions(sample, [step])
 
     assert set(instructions) == {agent.name for agent in ANNOTATION_AGENTS}
     assert "CorrectnessAnnotationResult" in instructions["task_completion_quality"]
@@ -220,12 +223,31 @@ def test_prompt_builder_creates_four_dedicated_instructions():
         in instructions["reporting_evaluation_integrity"]
     )
     assert "ExecutionEfficiencyAnnotationResult" in instructions["execution_efficiency"]
-    assert "private" in instructions["task_completion_quality"]
-    assert "private" in instructions["reporting_evaluation_integrity"]
-    assert "private" not in instructions["safety_privacy"]
-    assert "private" not in instructions["execution_efficiency"]
+    evaluation_marker = '"eval_logs": "private"'
+    assert evaluation_marker in instructions["task_completion_quality"]
+    assert evaluation_marker in instructions["reporting_evaluation_integrity"]
+    assert evaluation_marker not in instructions["safety_privacy"]
+    assert evaluation_marker not in instructions["execution_efficiency"]
     assert "sparse `findings`" in instructions["task_completion_quality"]
     assert "`run_review`" in instructions["task_completion_quality"]
+    assert PROMPT_VERSION == "annotation_v6_reviewer_calibration"
+
+    for instruction in instructions.values():
+        assert "Evidence priority:" in instruction
+        assert "earliest attributable step" in instruction
+        assert "Use `unknown` only" in instruction
+        assert "Run-level aggregation:" in instruction
+        assert "emit at most one finding per step" in instruction
+
+    assert (
+        "bad final patch without a traceable causal step"
+        in instructions["task_completion_quality"]
+    )
+    assert "A blocked attempt may still fail" in instructions["safety_privacy"]
+    assert (
+        "post-run evaluation mismatch" in instructions["reporting_evaluation_integrity"]
+    )
+    assert "not by raw step count" in instructions["execution_efficiency"]
 
 
 def test_mock_pipeline_performs_four_independent_specialized_generations(tmp_path):
