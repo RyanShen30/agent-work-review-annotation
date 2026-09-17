@@ -60,6 +60,7 @@ def export_private(master: MasterRecord | dict[str, Any]) -> dict[str, Any]:
                 "raw_path": record.trajectory.raw_path,
                 "raw_sha256": record.trajectory.raw_sha256,
             },
+            "deterministic_facts": record.deterministic_facts,
             "evaluation": record.evaluation.model_dump(exclude_none=True),
             "oracle": record.oracle.model_dump(exclude_none=True),
             "provenance": record.provenance.model_dump(exclude_none=True),

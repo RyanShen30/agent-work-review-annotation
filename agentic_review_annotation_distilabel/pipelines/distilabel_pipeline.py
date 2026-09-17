@@ -235,7 +235,7 @@ def _mock_specialized_result(
         "instance_id": row["instance_id"],
         "review_complete": True,
         "run_review": {
-            "rating": "normal" if agent.name == "execution_efficiency" else "pass",
+            "rating": "high" if agent.name == "execution_efficiency" else "pass",
             "reason": "The mock reviewer found no dimension-specific run-level issue.",
         },
         "findings": [],

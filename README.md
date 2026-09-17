@@ -23,6 +23,7 @@ coding agent 轨迹 + generated patch
 -> 回填 resolved / per-test result / evaluator provenance
 -> 对应 Adapter
 -> 确定性 step 切分
+-> 确定性事实提取与按维度分配
 -> 拼 annotation prompt
 -> Distilabel（local）或仓库工具调用（docker）调用模型
 -> Pydantic 校验结构化 JSON
@@ -54,6 +55,7 @@ agentic_review_annotation_distilabel/
 │   ├── prompt_builder.py
 │   └── schema.py
 ├── evaluation/               # 官方 benchmark evaluator 与结果回填
+├── evidence/                 # 从 trajectory/patch 提取确定性事实
 ├── pipelines/                # Local / Docker review pipeline
 │   ├── distilabel_pipeline.py
 │   └── review_docker.py
@@ -235,9 +237,22 @@ Docker 模式不使用 Distilabel 的模型缓存。`review-only` 默认跳过�
 - `CorrectnessAnnotationResult`：finding 使用 `warning`、`fail` 或 `unknown`，已恢复的问题可以带 `recovery: true`。
 - `SafetyPrivacyAnnotationResult`：finding 使用 `warning`、`fail` 或 `unknown`。
 - `ReportingIntegrityAnnotationResult`：finding 使用 `warning`、`fail` 或 `unknown`。
-- `ExecutionEfficiencyAnnotationResult`：finding 使用 `high`、`low` 或 `unknown`。
+- `ExecutionEfficiencyAnnotationResult`：finding 使用 `normal`、`low` 或 `unknown`；无问题的 `high` 不写 finding。
 
-每个专用 reviewer 返回 `review_complete: true`、一个整条轨迹的 `run_review`，以及只包含非默认步骤的稀疏 `findings`。前三个维度直接使用 `warning/fail/unknown`，遗漏步骤由 `annotation/merge.py` 补为 `pass`；效率直接使用 `high/low/unknown`，遗漏步骤补为 `normal`。合并器还会检查 instance id、非法或重复 step id、reason/recovery 约束，并输出兼容的完整 `StepReview` 和四个 run-level 结果。
+每个专用 reviewer 返回 `review_complete: true`、一个整条轨迹的 `run_review`，以及只包含非默认步骤的稀疏 `findings`。前三个维度直接使用 `warning/fail/unknown`，遗漏步骤由 `annotation/merge.py` 补为 `pass`；效率使用 `normal/low/unknown` 表示有问题或证据不足的步骤，遗漏步骤补为 `high`。合并器还会检查 instance id、非法或重复 step id、reason/recovery 约束，并输出兼容的完整 `StepReview` 和四个 run-level 结果。
+
+### 确定性事实层
+
+`evidence/facts.py` 在调用 Reviewer 前，从 canonical steps、tool observations 和 generated patch 机械提取事实，不调用模型，也不直接产生 pass/fail：
+
+- 命令、tool 名称、step id、退出码、timeout 和短输出摘录；
+- 测试命令及其实际退出结果；
+- generated patch 改动的文件和测试文件；
+- 完全相同命令的重复次数与所在步骤；
+- 网络访问、敏感路径、破坏性命令和权限变更等边界相关命令；
+- Agent 最后一条可见报告。
+
+同一份事实会按 Reviewer 最小化分配：Correctness 获得失败/测试命令事实和官方 evaluation；Safety 获得边界相关命令及测试文件改动；Reporting 获得测试执行、最终报告和官方 evaluation；Efficiency 获得命令序列、失败命令和重复命令。四者仍都能看到完整 canonical steps，事实层只是可复核的索引，不能被当成自动违规或错误标签。
 
 ## 产物在哪里
 
@@ -261,7 +276,7 @@ output/pipeline/public/*.json              # full public export
 output/pipeline/private/*.json             # full private export
 ```
 
-`normalized` 保存 master record，是 benchmark instance 的内部事实源；`preview` 仅供人工快速检查；`annotation` 保存兼容自动标注 JSON；`public` 默认不包含 step_reviews、oracle、resolved 或 evaluator logs；`private` 保存 grader/maintainer 需要的 evaluation、oracle、annotation.final 和 provenance。无效模型输出会写入对应 annotation 目录下的 `_failed/`。
+`normalized` 保存 master record，是 benchmark instance 的内部事实源；`preview` 仅供人工快速检查；`annotation` 保存兼容自动标注 JSON；`public` 默认不包含 step_reviews、deterministic facts、oracle、resolved 或 evaluator logs；`private` 保存 grader/maintainer 需要的 deterministic facts、evaluation、oracle、annotation.final 和 provenance。无效模型输出会写入对应 annotation 目录下的 `_failed/`。
 
 ## 输出 JSON 格式
 
@@ -287,6 +302,10 @@ output/pipeline/private/*.json             # full private export
     "raw_sha256": "...",
     "canonical_steps": []
   },
+  "deterministic_facts": {
+    "schema_version": "agent_work_review.deterministic_facts.v1",
+    "shared": {"totals": {}}
+  },
   "evaluation": {
     "status": "completed",
     "runner": "swebench.harness.run_evaluation",
@@ -306,7 +325,7 @@ output/pipeline/private/*.json             # full private export
   "annotation": {
     "auto": {
       "model": "model-name",
-      "prompt_version": "annotation_v4_official_evaluation",
+      "prompt_version": "annotation_v5_deterministic_evidence",
       "step_reviews": [],
       "run_reviews": null
     },
@@ -338,7 +357,7 @@ output/pipeline/private/*.json             # full private export
         "rating": "pass"
       },
       "execution_efficiency": {
-        "rating": "normal"
+        "rating": "high"
       }
     }
   ],
@@ -349,11 +368,11 @@ output/pipeline/private/*.json             # full private export
     },
     "safety_privacy": {"rating": "pass", "reason": "No safety issue was found."},
     "reporting_evaluation_integrity": {"rating": "pass", "reason": "The report matches the available evidence."},
-    "execution_efficiency": {"rating": "normal", "reason": "The run used a reasonable amount of work."}
+    "execution_efficiency": {"rating": "high", "reason": "No efficiency problem was found."}
   },
   "metadata": {
     "model": "model-name",
-    "prompt_version": "annotation_v4_official_evaluation",
+    "prompt_version": "annotation_v5_deterministic_evidence",
     "source_path": "output/traj/mini_swe_agent__example.json"
   }
 }
@@ -382,7 +401,7 @@ output/pipeline/private/*.json             # full private export
 
 字段约束：
 
-- 专用 Reviewer 的 `findings` 只能引用真实 `step_id`，不能重复；遗漏表示默认 `pass`，效率维度遗漏表示 `normal`；
+- 专用 Reviewer 的 `findings` 只能引用真实 `step_id`，不能重复；遗漏表示默认 `pass`，效率维度遗漏表示 `high`；
 - 合并后的 `step_reviews` 仍会完整覆盖每个真实 `step_id`；
 - 每个专用 Reviewer 必须返回 `review_complete: true` 和带非空理由的 `run_review`；
 - `task_completion_quality`、`safety_privacy`、`reporting_evaluation_integrity` 的 `rating` 使用 `pass`、`warning`、`fail`、`unknown`；

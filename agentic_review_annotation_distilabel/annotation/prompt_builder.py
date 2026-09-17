@@ -9,9 +9,13 @@ from agentic_review_annotation_distilabel.annotation.annotators import ANNOTATIO
 from agentic_review_annotation_distilabel.annotation.schema import (
     annotation_json_schema,
 )
+from agentic_review_annotation_distilabel.evidence import (
+    extract_deterministic_facts,
+    facts_for_dimension,
+)
 from agentic_review_annotation_distilabel.steps.base import CanonicalStep
 
-PROMPT_VERSION = "annotation_v4_official_evaluation"
+PROMPT_VERSION = "annotation_v5_deterministic_evidence"
 DEFAULT_PROMPT_PATH = (
     Path(__file__).resolve().parents[1] / "prompts" / "annotation_v1.md"
 )
@@ -57,6 +61,7 @@ class PromptBuilder:
                     sample,
                     steps,
                     include_evaluation=agent.include_evaluation,
+                    dimension=agent.dimension,
                 )
             )
             for agent in ANNOTATION_AGENTS
@@ -68,15 +73,22 @@ class PromptBuilder:
         steps: list[CanonicalStep],
         *,
         include_evaluation: bool,
+        dimension: str,
     ) -> dict[str, Any]:
         payload = self.build_model_payload(sample, steps)
         if not include_evaluation:
             payload.pop("evaluation", None)
+        payload["deterministic_facts"] = facts_for_dimension(
+            payload["deterministic_facts"], dimension
+        )
         return payload
 
     def build_payload(
         self, sample: Sample, steps: list[CanonicalStep]
     ) -> dict[str, Any]:
+        deterministic_facts = extract_deterministic_facts(
+            steps, generated_patch=sample.patch
+        )
         return {
             "instance_id": sample.instance_id,
             "repository": sample.repository,
@@ -85,6 +97,7 @@ class PromptBuilder:
             "evaluation": sample.evaluation,
             "generated_patch": sample.patch,
             "canonical_steps": [step.to_dict() for step in steps],
+            "deterministic_facts": deterministic_facts,
         }
 
     def build_model_payload(
@@ -92,6 +105,10 @@ class PromptBuilder:
     ) -> dict[str, Any]:
         if not self.compact_for_model:
             return self.build_payload(sample, steps)
+
+        deterministic_facts = extract_deterministic_facts(
+            steps, generated_patch=sample.patch
+        )
 
         compact_steps = []
         used_step_chars = 0
@@ -126,6 +143,7 @@ class PromptBuilder:
             "evaluation": sample.evaluation,
             "generated_patch": truncate_text(sample.patch or "", self.max_patch_chars),
             "canonical_steps": compact_steps,
+            "deterministic_facts": deterministic_facts,
             "model_input_note": (
                 "This is a compact model payload. Full task, generated patch, raw trajectory, "
                 "and full canonical steps are saved in output/*/normalized for human audit."

@@ -27,8 +27,8 @@ Ratings:
   - `fail`: the core objective or a key requirement is not met, or a use-affecting issue exists.
   - `unknown`: evidence is insufficient to judge the dimension reliably.
 - `execution_efficiency` must use:
-  - `high`: steps are compact, tools/resources are used reasonably, and necessary verification/safety checks are not omitted.
-  - `normal`: some reasonable exploration or minor rework occurs, and overall effort fits the task.
+  - `high`: the default when no efficiency problem is evidenced; steps use tools/resources reasonably and do not omit necessary verification/safety checks.
+  - `normal`: a real but limited inefficiency exists without materially derailing the run.
   - `low`: avoidable detours, repeated ineffective attempts, or excessive resource use make the effort clearly disproportionate.
   - `unknown`: execution trace, time, or resource evidence is insufficient.
 
@@ -43,7 +43,7 @@ Task-completion recovery:
 Review procedure:
 
 1. Understand the task or issue from `task`.
-2. Inspect the final `generated_patch` and `evaluation` evidence when present.
+2. Inspect the final `generated_patch`, `evaluation`, and mechanically extracted `deterministic_facts` when present. Facts are evidence locators, not labels.
 3. Read the complete `canonical_steps` in order.
 4. For each step, judge what the agent did or claimed at that step using only available evidence.
 5. For task-completion issues, check later steps to determine whether the specific problem was self-corrected.

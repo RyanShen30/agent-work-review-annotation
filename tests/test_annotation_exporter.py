@@ -34,6 +34,10 @@ def test_public_benchmark_task_hides_annotation_and_oracle():
                 "raw_sha256": "sha",
                 "canonical_steps": [{"step_id": 1, "content": {"type": "agent_turn"}}],
             },
+            "deterministic_facts": {
+                "schema_version": "agent_work_review.deterministic_facts.v1",
+                "shared": {"totals": {"steps": 1}},
+            },
             "evaluation": {"resolved": True, "eval_logs": "hidden logs"},
             "oracle": {
                 "gold_patch": "gold patch",
@@ -82,9 +86,11 @@ def test_public_benchmark_task_hides_annotation_and_oracle():
     assert "final_annotation" not in public
     assert "oracle" not in public
     assert "evaluation" not in public
+    assert "deterministic_facts" not in public
     assert "gold_patch" not in str(public)
     assert "test_fail" not in str(public)
     assert private["oracle"]["gold_patch"] == "gold patch"
+    assert private["deterministic_facts"]["shared"]["totals"]["steps"] == 1
     assert private["annotation"]["final"]["step_reviews"][0]["step"] == 1
 
 
@@ -126,8 +132,8 @@ def test_master_persists_auto_run_reviews():
                     "reason": "Accurate report.",
                 },
                 "execution_efficiency": {
-                    "rating": "normal",
-                    "reason": "Normal effort.",
+                    "rating": "high",
+                    "reason": "No efficiency issue.",
                 },
             },
         }
@@ -137,11 +143,11 @@ def test_master_persists_auto_run_reviews():
         master=MasterRecord(instance_id="sample"),
         annotation=annotation,
         model="review-model",
-        prompt_version="annotation_v4_official_evaluation",
+        prompt_version="annotation_v5_deterministic_evidence",
     )
 
     assert updated.annotation.auto.run_reviews is not None
-    assert updated.annotation.auto.run_reviews.execution_efficiency.rating == "normal"
+    assert updated.annotation.auto.run_reviews.execution_efficiency.rating == "high"
 
 
 def test_existing_annotation_requires_and_loads_current_run_reviews(tmp_path):
@@ -154,15 +160,15 @@ def test_existing_annotation_requires_and_loads_current_run_reviews(tmp_path):
     "task_completion_quality": {"rating": "pass"},
     "safety_privacy": {"rating": "pass"},
     "reporting_evaluation_integrity": {"rating": "pass"},
-    "execution_efficiency": {"rating": "normal"}
+    "execution_efficiency": {"rating": "high"}
   }],
   "run_reviews": {
     "task_completion_quality": {"rating": "pass", "reason": "Correct run."},
     "safety_privacy": {"rating": "pass", "reason": "Safe run."},
     "reporting_evaluation_integrity": {"rating": "pass", "reason": "Accurate report."},
-    "execution_efficiency": {"rating": "normal", "reason": "Normal effort."}
+    "execution_efficiency": {"rating": "high", "reason": "No efficiency issue."}
   },
-  "metadata": {"prompt_version": "annotation_v4_official_evaluation"}
+  "metadata": {"prompt_version": "annotation_v5_deterministic_evidence"}
 }\n""",
         encoding="utf-8",
     )
@@ -173,7 +179,7 @@ def test_existing_annotation_requires_and_loads_current_run_reviews(tmp_path):
     assert is_valid_existing_result(path, "sample", [1])
 
     stale = path.read_text(encoding="utf-8").replace(
-        "annotation_v4_official_evaluation", "annotation_v2_specialized"
+        "annotation_v5_deterministic_evidence", "annotation_v2_specialized"
     )
     path.write_text(stale, encoding="utf-8")
     assert not is_valid_existing_result(path, "sample", [1])
