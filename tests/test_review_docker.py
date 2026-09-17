@@ -55,7 +55,7 @@ def test_docker_review_rebuilds_patch_uses_tools_and_cleans_up(
                             "instance_id": "sample",
                             "review_complete": True,
                             "run_review": {
-                                "rating": "normal" if is_efficiency else "pass",
+                                "rating": "high" if is_efficiency else "pass",
                                 "reason": "No issue found during the complete review.",
                             },
                             "findings": [],

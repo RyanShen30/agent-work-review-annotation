@@ -262,11 +262,13 @@ def prepare_rows(
             "generated_patch": normalized["generated_patch"],
             "evaluation": normalized["evaluation"],
             "canonical_steps": normalized["canonical_steps"],
+            "deterministic_facts": normalized["deterministic_facts"],
         }
         master = build_master_record(
             sample=sample,
             dataset=dataset,
             canonical_steps=normalized["canonical_steps"],
+            deterministic_facts=normalized["deterministic_facts"],
             source_path=path,
             source_sha256=sha256_text(raw_text),
         )
@@ -330,6 +332,7 @@ def prepare_rows(
                 "evaluation": sample.evaluation,
                 "trajectory": sample.trajectory,
                 "canonical_steps": normalized["canonical_steps"],
+                "deterministic_facts": normalized["deterministic_facts"],
                 "valid_step_ids": valid_step_ids,
                 "prompt_version": PROMPT_VERSION,
                 "source_path": str(path),
@@ -383,10 +386,19 @@ def build_normalized_preview(normalized: dict[str, Any]) -> dict[str, Any]:
             max_chars=3000,
         ),
         "evaluation": normalized.get("evaluation"),
+        "deterministic_facts_summary": summarize_deterministic_facts(
+            normalized.get("deterministic_facts")
+        ),
         "canonical_steps_preview": [
             preview_step(step) for step in normalized.get("canonical_steps", [])
         ],
     }
+
+
+def summarize_deterministic_facts(facts: Any) -> dict[str, Any]:
+    if not isinstance(facts, dict):
+        return {}
+    return {key: facts[key] for key in ("schema_version", "shared") if key in facts}
 
 
 def build_master_record(
@@ -394,6 +406,7 @@ def build_master_record(
     sample: Any,
     dataset: str,
     canonical_steps: list[dict[str, Any]],
+    deterministic_facts: dict[str, Any],
     source_path: Path,
     source_sha256: str,
 ) -> MasterRecord:
@@ -426,6 +439,7 @@ def build_master_record(
                 "raw_sha256": source_sha256,
                 "canonical_steps": canonical_steps,
             },
+            "deterministic_facts": deterministic_facts,
             "evaluation": evaluation,
             "oracle": sample.oracle or {},
             "annotation": {"auto": {"step_reviews": []}, "final": None},

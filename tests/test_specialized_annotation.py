@@ -95,7 +95,7 @@ def test_merges_sparse_specialized_results_into_dense_step_and_run_reviews():
         "task_completion_quality": {"rating": "pass"},
         "safety_privacy": {"rating": "pass"},
         "reporting_evaluation_integrity": {"rating": "pass"},
-        "execution_efficiency": {"rating": "normal"},
+        "execution_efficiency": {"rating": "high"},
     }
     assert dumped["step_reviews"][1]["task_completion_quality"] == {
         "rating": "fail",
@@ -184,7 +184,10 @@ def test_rejects_invalid_specialized_outputs_before_merge():
                 {
                     "instance_id": "sample",
                     "review_complete": True,
-                    "run_review": {"rating": "normal", "reason": "Normal run."},
+                    "run_review": {
+                        "rating": "high",
+                        "reason": "No efficiency issue.",
+                    },
                     "findings": [],
                 }
             ),
@@ -258,7 +261,7 @@ def test_mock_pipeline_performs_four_independent_specialized_generations(tmp_pat
     assert generation["step_reviews"][0]["task_completion_quality"] == {
         "rating": "pass"
     }
-    assert generation["step_reviews"][0]["execution_efficiency"] == {"rating": "normal"}
+    assert generation["step_reviews"][0]["execution_efficiency"] == {"rating": "high"}
 
 
 def test_invalid_annotator_generation_is_written_to_failed_dir(tmp_path):
@@ -268,7 +271,7 @@ def test_invalid_annotator_generation_is_written_to_failed_dir(tmp_path):
                 "instance_id": "sample",
                 "review_complete": True,
                 "run_review": {
-                    "rating": "normal"
+                    "rating": "high"
                     if agent.name == "execution_efficiency"
                     else "pass",
                     "reason": "No issue found.",

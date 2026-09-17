@@ -159,7 +159,7 @@ class EfficiencyStepFinding(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     step_id: int
-    rating: Literal["high", "low", "unknown"]
+    rating: Literal["normal", "low", "unknown"]
     reason: str = Field(min_length=1)
 
     @field_validator("reason", mode="before")
@@ -308,6 +308,7 @@ class MasterRecord(BaseModel):
     source: SourceRecord = Field(default_factory=SourceRecord)
     run: RunRecord = Field(default_factory=RunRecord)
     trajectory: TrajectoryRecord = Field(default_factory=TrajectoryRecord)
+    deterministic_facts: dict[str, Any] = Field(default_factory=dict)
     evaluation: EvaluationRecord = Field(default_factory=EvaluationRecord)
     oracle: OracleRecord = Field(default_factory=OracleRecord)
     annotation: AnnotationRecord = Field(default_factory=AnnotationRecord)

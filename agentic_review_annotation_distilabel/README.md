@@ -16,6 +16,7 @@ coding agent 轨迹 + generated patch
 -> 官方 SWE-bench evaluation 与结果回填（full 模式）
 -> Dataset Adapter
 -> 确定性 step 切分
+-> 确定性事实提取与按维度分配
 -> 四个专职 annotation prompt
 -> Distilabel 独立调用四个 annotator
 -> Pydantic 校验四个 typed result
@@ -95,6 +96,10 @@ mini-swe-agent 的 Docker 运行可通过 `generation.environment_kwargs.save_fi
     "raw_sha256": "...",
     "canonical_steps": []
   },
+  "deterministic_facts": {
+    "schema_version": "agent_work_review.deterministic_facts.v1",
+    "shared": {"totals": {}}
+  },
   "evaluation": {},
   "oracle": {
     "gold_patch": "...",
@@ -105,7 +110,7 @@ mini-swe-agent 的 Docker 运行可通过 `generation.environment_kwargs.save_fi
   "annotation": {
     "auto": {
       "model": "...",
-      "prompt_version": "annotation_v4_official_evaluation",
+      "prompt_version": "annotation_v5_deterministic_evidence",
       "step_reviews": [],
       "run_reviews": null
     },
@@ -117,9 +122,9 @@ mini-swe-agent 的 Docker 运行可通过 `generation.environment_kwargs.save_fi
 
 `output/*/public/` 默认使用 `benchmark_task` 模式，只包含 reviewer 做题所需信息：`instance_id`、`problem_statement`、`repo`、`base_commit`、必要环境信息、agent/model 元数据、`canonical_steps` 和 `generated_patch`。默认 public export 不包含 `step_reviews`、gold patch、test patch、FAIL_TO_PASS、PASS_TO_PASS、resolved 或 evaluator logs。
 
-`output/*/private/` 包含 evaluation、oracle、`annotation.final` 和必要 provenance/audit 信息。公开分析集需要显式调用 `export_public(..., mode="annotation_release")` 才会包含 final step annotation。
+`output/*/private/` 包含 deterministic facts、evaluation、oracle、`annotation.final` 和必要 provenance/audit 信息。公开分析集需要显式调用 `export_public(..., mode="annotation_release")` 才会包含 final step annotation。
 
-四个专用 Reviewer 分别返回 `review_complete: true`、带理由的 `run_review` 和稀疏 `findings`。前三个维度只在步骤为 `warning/fail/unknown` 时写 finding，遗漏步骤合并为 `pass`；效率只写 `high/low/unknown`，遗漏步骤合并为 `normal`。合并后保存的 auto annotation schema：
+四个专用 Reviewer 分别返回 `review_complete: true`、带理由的 `run_review` 和稀疏 `findings`。前三个维度只在步骤为 `warning/fail/unknown` 时写 finding，遗漏步骤合并为 `pass`；效率只在步骤为 `normal/low/unknown` 时写 finding，遗漏步骤合并为 `high`。合并后保存的 auto annotation schema：
 
 ```json
 {
@@ -149,7 +154,7 @@ mini-swe-agent 的 Docker 运行可通过 `generation.environment_kwargs.save_fi
     "task_completion_quality": {"rating": "unknown", "reason": "..."},
     "safety_privacy": {"rating": "pass", "reason": "..."},
     "reporting_evaluation_integrity": {"rating": "pass", "reason": "..."},
-    "execution_efficiency": {"rating": "normal", "reason": "..."}
+    "execution_efficiency": {"rating": "high", "reason": "..."}
   }
 }
 ```

@@ -125,7 +125,7 @@ def _merge_quality_dimension(item: QualityStepFinding | None) -> DimensionReview
 
 def _merge_efficiency(item: EfficiencyStepFinding | None) -> ExecutionEfficiencyReview:
     if item is None:
-        return ExecutionEfficiencyReview(rating="normal")
+        return ExecutionEfficiencyReview(rating="high")
     return ExecutionEfficiencyReview(
         rating=item.rating,
         reason=item.reason,
