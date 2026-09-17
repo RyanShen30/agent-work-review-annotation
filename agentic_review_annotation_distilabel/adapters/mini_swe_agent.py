@@ -100,7 +100,12 @@ def _extract_first_user_text(messages: list[dict[str, Any]]) -> str | None:
 def _extract_evaluation(raw: Mapping[str, Any]) -> dict[str, Any]:
     info = raw.get("info") if isinstance(raw.get("info"), Mapping) else {}
     outcome = raw.get("outcome") if isinstance(raw.get("outcome"), Mapping) else {}
-    evaluation = {
+    official = (
+        dict(raw["evaluation"])
+        if isinstance(raw.get("evaluation"), Mapping)
+        else {}
+    )
+    fallback = {
         "exit_status": _first_present(
             raw,
             "outcome.exit_status",
@@ -116,7 +121,10 @@ def _extract_evaluation(raw: Mapping[str, Any]) -> dict[str, Any]:
         "model_stats": info.get("model_stats") if isinstance(info, Mapping) else None,
         "trajectory_format": raw.get("trajectory_format"),
     }
-    return {key: value for key, value in evaluation.items() if value is not None}
+    for key, value in fallback.items():
+        if value is not None:
+            official.setdefault(key, value)
+    return official
 
 
 def _extract_source(raw: Mapping[str, Any]) -> dict[str, Any]:

@@ -18,7 +18,9 @@
 ## 当前流程
 
 ```text
-原始 JSON
+coding agent 轨迹 + generated patch
+-> 官方 SWE-bench evaluation（full 模式）
+-> 回填 resolved / per-test result / evaluator provenance
 -> 对应 Adapter
 -> 确定性 step 切分
 -> 拼 annotation prompt
@@ -51,6 +53,7 @@ agentic_review_annotation_distilabel/
 │   ├── merge.py
 │   ├── prompt_builder.py
 │   └── schema.py
+├── evaluation/               # 官方 benchmark evaluator 与结果回填
 ├── pipelines/                # Local / Docker review pipeline
 │   ├── distilabel_pipeline.py
 │   └── review_docker.py
@@ -84,8 +87,8 @@ git submodule update --init --recursive
 建议使用虚拟环境：
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -r agentic_review_annotation_distilabel/requirements.txt
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -e .
 ```
 
 之后运行命令时，推荐一直用 `.venv/bin/python`，这样不需要手动 `activate`。
@@ -123,7 +126,7 @@ export LLM_BASE_URL=https://example.com/v1
 
 顶层 `mode` 支持 `traj-only`、`review-only`、`full`。四个脚本都显式使用 `config/example.yaml`，并用脚本中的变量覆盖相关参数。运行 review 的 `run_agent_work_review.sh` 和 `run_pipeline.sh` 可通过顶部的 `REVIEW_RUNTIME=local` 或 `REVIEW_RUNTIME=docker`进行控制。
 
-`full` 模式会先检查 `output/pipeline/traj/` 中是否已有当前 harness、模型和 benchmark 实例的有效轨迹；存在时直接复用该文件并重新运行 review。需要重新生成轨迹时，删除对应的 JSON 文件后再运行脚本。
+`full` 模式会先检查 `output/pipeline/traj/` 中是否已有当前 harness、模型和 benchmark 实例的有效轨迹；存在时直接复用。之后依次执行官方 evaluation、结果回填和 review。需要重新生成轨迹时，删除对应的 JSON 文件后再运行脚本。
 
 ```bash
 ./scripts/run_mini_swe_agent.sh     # traj-only
@@ -174,7 +177,24 @@ canonical sample + canonical steps
 -> annotation.final
 ```
 
-四个 annotator 接收相同的 `canonical_steps` 和相同 step 编号。`TaskCompletionQualityAnnotator` 可以接收 `evaluation` 等私有评测证据辅助 GT 构造；其他三个 annotator 默认只接收 task、repo/environment 元数据、generated patch 和 canonical steps。
+四个 annotator 接收相同的 `canonical_steps` 和相同 step 编号。`TaskCompletionQualityAnnotator` 与 `ReportingEvaluationIntegrityAnnotator` 接收官方 `evaluation`：前者判断最终任务完成情况，后者核对 agent 的测试及完成声明。Safety 和 Efficiency reviewer 不接收 evaluation，避免无关结果污染判断。
+
+### 官方 Evaluation
+
+`full` 模式默认在 coding agent 与 reviewer 之间调用官方 `swebench.harness.run_evaluation`。评测输入是“官方原始镜像 + generated patch”，不会使用 agent 最终快照，因此 agent 临时安装的依赖、未跟踪文件或其他容器残留不能掩盖 patch 本身的问题。
+
+```yaml
+evaluation:
+  enabled: true
+  runner: official_swebench
+  timeout: 1800
+  max_workers: 1
+  open_file_limit: 4096
+```
+
+Evaluator 从 `generation.benchmark_path` 指向的 parquet 重新读取官方 task 定义，生成标准 `predictions.jsonl` 后运行。正常测试结果回填正式 `report.json`；官方日志能确定的 patch apply failure 或 test timeout 会以独立 status 回填为 unresolved。缺少 patch、benchmark 字段不兼容、明确的基础设施故障或无法分类的缺失 report 会中止流水线，避免把环境问题误写成模型错误。
+
+当前 evaluator 适用于包含 `eval_script`、`log_parser`、`FAIL_TO_PASS` 和 `PASS_TO_PASS` 等官方字段的 SWE-bench / SWE-bench Verified / SWE-bench Multilingual 数据。SWE-bench Pro 的字段及 evaluator 契约不同，不能直接复用这一 runner。
 
 ### Review 运行环境
 
@@ -232,6 +252,7 @@ output/annotation/annotation/_failed/      # review-only 失败输出
 output/annotation/public/*.json            # review-only public export
 output/annotation/private/*.json           # review-only private export
 output/pipeline/traj/*.json                # full 原始轨迹
+output/pipeline/evaluation/*/              # predictions、官方 reports 与测试日志
 output/pipeline/normalized/*.json          # full 标准化输入
 output/pipeline/preview/*.json             # full 人工预览
 output/pipeline/annotation/*.json          # full 最终标注
@@ -267,9 +288,14 @@ output/pipeline/private/*.json             # full private export
     "canonical_steps": []
   },
   "evaluation": {
-    "resolved": null,
+    "status": "completed",
+    "runner": "swebench.harness.run_evaluation",
+    "runner_version": "5.0.2",
+    "run_id": "agent-work-review-...",
+    "resolved": false,
     "per_test_results": [],
-    "eval_logs": null
+    "official_report": {},
+    "eval_logs": {}
   },
   "oracle": {
     "gold_patch": "diff --git ...",
@@ -280,7 +306,7 @@ output/pipeline/private/*.json             # full private export
   "annotation": {
     "auto": {
       "model": "model-name",
-      "prompt_version": "annotation_v3_sparse_run_level",
+      "prompt_version": "annotation_v4_official_evaluation",
       "step_reviews": [],
       "run_reviews": null
     },
@@ -327,7 +353,7 @@ output/pipeline/private/*.json             # full private export
   },
   "metadata": {
     "model": "model-name",
-    "prompt_version": "annotation_v3_sparse_run_level",
+    "prompt_version": "annotation_v4_official_evaluation",
     "source_path": "output/traj/mini_swe_agent__example.json"
   }
 }
@@ -374,7 +400,7 @@ output/pipeline/private/*.json             # full private export
 - `run.generated_patch`：来自 `info.submission`、`submission`、`generated_patch`、`model_patch` 或 mini-swe-agent runner 顶层 `patch`；
 - `oracle.gold_patch`：来自 SWE-bench `patch`，不要和 generated patch 混用；
 - `oracle.test_patch`、`fail_to_pass`、`pass_to_pass`、`eval_type`、`eval_image`、`eval_script`、`log_parser`：来自 SWE-bench 对应字段，缺失时为空或 null；
-- `evaluation`：来自 `outcome.exit_status`、`info.exit_status`、`eval_result`、`eval_logs`、`model_stats` 等。
+- `evaluation`：优先来自官方 evaluator 回填的 `resolved`、per-test facts、official report 和日志路径；未正式评测的旧轨迹才回退到原有 outcome/eval 字段。
 
 MiniSWEAgent step parser 会把一条 assistant message 和其后的 tool/user observations 组成一个 `agent_turn`：
 
@@ -419,4 +445,4 @@ PYTHONPATH=. uv run --with pytest pytest tests -q
 
 ## 已知边界
 
-`INSTANCE=-1` 会顺序处理整个 SWE-bench。大样本运行和真实模型标注会产生费用，批量运行前建议先单条测试。
+`INSTANCE=-1` 会顺序生成整个 benchmark 的轨迹，官方 evaluator 再按 `evaluation.max_workers` 并行运行测试。模型调用会产生费用，evaluation 会消耗 CPU、内存、Docker 磁盘和较长测试时间，批量运行前建议先单条验证完整链路。

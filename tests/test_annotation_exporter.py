@@ -137,7 +137,7 @@ def test_master_persists_auto_run_reviews():
         master=MasterRecord(instance_id="sample"),
         annotation=annotation,
         model="review-model",
-        prompt_version="annotation_v3_sparse_run_level",
+        prompt_version="annotation_v4_official_evaluation",
     )
 
     assert updated.annotation.auto.run_reviews is not None
@@ -162,7 +162,7 @@ def test_existing_annotation_requires_and_loads_current_run_reviews(tmp_path):
     "reporting_evaluation_integrity": {"rating": "pass", "reason": "Accurate report."},
     "execution_efficiency": {"rating": "normal", "reason": "Normal effort."}
   },
-  "metadata": {"prompt_version": "annotation_v3_sparse_run_level"}
+  "metadata": {"prompt_version": "annotation_v4_official_evaluation"}
 }\n""",
         encoding="utf-8",
     )
@@ -173,7 +173,7 @@ def test_existing_annotation_requires_and_loads_current_run_reviews(tmp_path):
     assert is_valid_existing_result(path, "sample", [1])
 
     stale = path.read_text(encoding="utf-8").replace(
-        "annotation_v3_sparse_run_level", "annotation_v2_specialized"
+        "annotation_v4_official_evaluation", "annotation_v2_specialized"
     )
     path.write_text(stale, encoding="utf-8")
     assert not is_valid_existing_result(path, "sample", [1])

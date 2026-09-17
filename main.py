@@ -132,12 +132,26 @@ def main() -> None:
             command += ["--overwrite"]
         if args.runner:
             command += ["--runner", args.runner]
-        review_succeeded = False
+        pipeline_succeeded = False
         try:
+            evaluation = config.get("evaluation", {})
+            if mode == "full" and bool(evaluation.get("enabled", False)):
+                evaluation_command = [
+                    sys.executable,
+                    "-m",
+                    "agentic_review_annotation_distilabel.evaluation.swebench",
+                    "--config",
+                    str(config_path),
+                    "--output-dir",
+                    str(base / "evaluation"),
+                    "--input",
+                    *(str(path) for path in generated_trajectories),
+                ]
+                run(evaluation_command, env)
             run(command, env)
-            review_succeeded = True
+            pipeline_succeeded = True
         finally:
-            if mode == "full" and should_cleanup(cleanup_policy, review_succeeded):
+            if mode == "full" and should_cleanup(cleanup_policy, pipeline_succeeded):
                 cleanup_docker_images(generated_trajectories)
 
 

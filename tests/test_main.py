@@ -98,3 +98,40 @@ def test_full_mode_keeps_images_when_review_fails_with_on_success(
         raise AssertionError("review failure should propagate")
 
     assert cleaned == []
+
+
+def test_full_mode_runs_official_evaluation_before_review(tmp_path, monkeypatch):
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "mode: full\n"
+        "generation:\n  harness: mini_swe_agent\n  benchmark_path: benchmark.parquet\n"
+        "evaluation:\n  enabled: true\n",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "output" / "pipeline" / "traj"
+    output_dir.mkdir(parents=True)
+    trajectory = output_dir / "run.json"
+    trajectory.write_text("{}", encoding="utf-8")
+    commands = []
+
+    def fake_run(command, env):
+        commands.append(command)
+        return str(trajectory) if len(commands) == 1 else ""
+
+    monkeypatch.setattr(main, "ROOT", tmp_path)
+    monkeypatch.setattr(main, "run", fake_run)
+    monkeypatch.setattr(main, "cleanup_docker_images", lambda paths: None)
+    monkeypatch.setattr(sys, "argv", ["main.py", "--config", str(config)])
+
+    main.main()
+
+    assert commands[1][0:3] == [
+        sys.executable,
+        "-m",
+        "agentic_review_annotation_distilabel.evaluation.swebench",
+    ]
+    assert commands[2][0:3] == [
+        sys.executable,
+        "-m",
+        "agentic_review_annotation_distilabel.run",
+    ]

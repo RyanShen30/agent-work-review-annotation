@@ -6,7 +6,7 @@ generation:
   harness: mini_swe_agent  # mini_swe_agent, openhands, or opencollab
   model: openai/gpt-5.4
   runtime: docker
-  benchmark_path: data/swe-bench-verified/SWE-bench_Verified
+  benchmark_path: data/swe-bench-verified/test.parquet
   instance: 10  # row index, instance_id, or -1 for the entire benchmark
   workspace: .
   step_limit: 50
@@ -29,6 +29,13 @@ generation:
   #   use_worktrees: true
   #   prebuild_team: false
   #   serialize_turns: false
+
+evaluation:
+  enabled: true
+  runner: official_swebench
+  timeout: 1800
+  max_workers: 1
+  open_file_limit: 4096
 
 review:
   dataset: mini_swe_agent  # must match generation.harness
