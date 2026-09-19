@@ -1,6 +1,7 @@
 # traj-only: generate trajectory; review-only: annotate existing trajectories; full: both.
 mode: full
 cleanup_policy: on_success  # always, on_success, or never; full mode only
+n_workers: 1  # maximum concurrency inside each phase; phases still run in order
 
 generation:
   harness: mini_swe_agent  # mini_swe_agent, openhands, or opencollab
@@ -34,7 +35,6 @@ evaluation:
   enabled: true
   runner: official_swebench
   timeout: 1800
-  max_workers: 1
   open_file_limit: 4096
 
 review:

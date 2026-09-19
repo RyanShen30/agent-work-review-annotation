@@ -10,6 +10,7 @@ dependencies = [
     "python-dotenv>=1.2.3",
     "pyyaml==6.0.2",
     "swebench==5.0.2",
+    "tqdm>=4.67,<5",
 ]
 
 [tool.pytest.ini_options]

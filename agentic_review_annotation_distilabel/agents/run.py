@@ -3,10 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
 import yaml
+from tqdm import tqdm
 
 from .base import AgentConfig, PROJECT_ROOT, trajectory_filename
 from .mini_swe_agent import MiniSWEAgent
@@ -21,7 +24,7 @@ AGENTS = {
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run one coding-agent task")
+    parser = argparse.ArgumentParser(description="Run coding-agent tasks")
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--problem")
     parser.add_argument("--instance")
@@ -44,29 +47,61 @@ def main() -> None:
         else [None]
     )
     configured_image = config.docker_image
-    for instance in instances:
+
+    def run_instance(instance: dict[str, Any] | None) -> tuple[Path, bool]:
+        worker_config = config.model_copy(deep=True)
         if instance:
-            config.instance_id = str(instance["instance_id"])
-            config.base_commit = instance.get("base_commit")
-            config.docker_image = (
+            worker_config.instance_id = str(instance["instance_id"])
+            worker_config.base_commit = instance.get("base_commit")
+            worker_config.docker_image = (
                 configured_image or instance.get("image") or swebench_image(instance)
             )
-            config.benchmark_instance = instance
+            worker_config.benchmark_instance = instance
         problem = args.problem or (instance and instance.get("problem_statement"))
         if not problem:
-            parser.error("provide --problem or benchmark_path in YAML")
-        output_dir = config.output_dir
+            raise ValueError("provide --problem or benchmark_path in YAML")
+        output_dir = worker_config.output_dir
         if not output_dir.is_absolute():
             output_dir = PROJECT_ROOT / output_dir
-        path = output_dir / trajectory_filename(config.harness, config.model, problem)
-        if reusable_trajectory(path, config, problem):
-            print(f"reusing trajectory: {path}")
-            print(path)
-            continue
-        if not config.api_key:
-            parser.error("export LLM_API_KEY before running")
-        result = AGENTS[config.harness](config).run(problem)
-        print(result["output_path"])
+        path = output_dir / trajectory_filename(
+            worker_config.harness, worker_config.model, problem
+        )
+        if reusable_trajectory(path, worker_config, problem):
+            return path, True
+        if not worker_config.api_key:
+            raise RuntimeError("export LLM_API_KEY before running")
+        result = AGENTS[worker_config.harness](worker_config).run(problem)
+        return Path(result["output_path"]), False
+
+    failures: list[str] = []
+    with ThreadPoolExecutor(max_workers=config.n_workers) as executor:
+        futures = {
+            executor.submit(run_instance, instance): instance for instance in instances
+        }
+        for future in tqdm(
+            as_completed(futures),
+            total=len(futures),
+            desc="Generating trajectories",
+            unit="task",
+            disable=len(futures) == 1,
+        ):
+            instance = futures[future]
+            instance_id = str((instance or {}).get("instance_id") or "manual-task")
+            try:
+                path, reused = future.result()
+            except Exception as exc:
+                failures.append(f"{instance_id}: {type(exc).__name__}: {exc}")
+                print(f"generation failed: {failures[-1]}", file=sys.stderr)
+                continue
+            if reused:
+                print(f"reusing trajectory: {path}")
+            print(path, flush=True)
+
+    if failures:
+        raise SystemExit(
+            f"generation incomplete: {len(failures)}/{len(instances)} case(s) failed; "
+            "rerun the same command to resume"
+        )
 
 
 def reusable_trajectory(path: Path, config: AgentConfig, problem: str) -> bool:

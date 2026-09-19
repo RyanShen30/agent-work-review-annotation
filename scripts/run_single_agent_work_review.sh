@@ -3,10 +3,10 @@ set -e
 cd "$(dirname "$0")/.."
 
 CONFIG=config/example.yaml
+INPUT=${1:?"usage: $0 path/to/trajectory.json"}
 
 # Review
 DATASET=mini_swe_agent
-INPUT=output/pipeline/traj
 RUNNER=llm
 REVIEW_RUNTIME=docker
 USE_CACHE=true
@@ -21,9 +21,8 @@ MAX_PATCH_CHARS=20000
 MAX_STEP_CHARS=6000
 MAX_TOTAL_STEP_CHARS=60000
 
-exec .venv/bin/python main.py --config "$CONFIG" --mode review-only \
+exec .venv/bin/python main.py --config "$CONFIG" --mode review-only --input "$INPUT" \
   --set review.dataset="$DATASET" \
-  --set review.input="$INPUT" \
   --set review.runner="$RUNNER" \
   --set review.runtime="$REVIEW_RUNTIME" \
   --set review.use_cache="$USE_CACHE" \

@@ -212,11 +212,20 @@ set +a
 | 文件 | 主要用途 | 关键变量 |
 | --- | --- | --- |
 | `scripts/run_pipeline.sh` | 完整链路 | `GENERATION_MODEL`、`REVIEW_MODEL`、`BENCHMARK_PATH`、`INSTANCE` |
-| `scripts/run_mini_swe_agent.sh` | 只生成 mini-swe-agent 轨迹 | `MODEL`、`BENCHMARK_PATH`、`INSTANCE` |
-| `scripts/run_agent_work_review.sh` | 只评审已有轨迹 | `MODEL`、`INPUT`、`DATASET` |
-| `scripts/run_opencollab.sh` | 生成 OpenCollab 轨迹 | `MODEL`、`MODE`、`TEAM_CONFIG` |
+| `scripts/run_single_mini_swe_agent.sh` | 为一个 instance 生成 mini-swe-agent 轨迹 | `MODEL`、`BENCHMARK_PATH`、`INSTANCE` |
+| `scripts/run_batch_mini_swe_agent.sh` | 为 benchmark 中全部 instance 并发生成轨迹 | `MODEL`、`BENCHMARK_PATH`、`N_WORKERS` |
+| `scripts/run_single_agent_work_review.sh` | 评审命令行传入的一个 trajectory JSON | `MODEL`、`DATASET` |
+| `scripts/run_batch_agent_work_review.sh` | 并发评审目录中的全部 trajectory JSON | `MODEL`、`INPUT`、`N_WORKERS` |
+| `scripts/run_single_opencollab.sh` | 为一个 instance 生成 OpenCollab 轨迹 | `MODEL`、`MODE`、`TEAM_CONFIG`、`INSTANCE` |
 
 模型名必须使用当前 API 服务能够识别的 ID。不要把 API key 写进脚本或提交到仓库。
+
+单条 review 直接传入 trajectory 文件；batch generation 会对整个 benchmark 显示完成进度：
+
+```bash
+./scripts/run_single_agent_work_review.sh output/traj/example.json
+./scripts/run_batch_mini_swe_agent.sh
+```
 
 ### 6. 跑通一条完整链路
 
@@ -256,14 +265,14 @@ REVIEW_MODEL=你的_Reviewer_模型
 
 | 模式 | 作用 | 常用入口 |
 | --- | --- | --- |
-| `traj-only` | 只运行 Coding Agent 并保存 trajectory | `scripts/run_mini_swe_agent.sh`、`scripts/run_opencollab.sh` |
-| `review-only` | 对已有 trajectory 标准化并预标注 | `scripts/run_agent_work_review.sh` |
+| `traj-only` | 只运行 Coding Agent 并保存 trajectory | `scripts/run_single_mini_swe_agent.sh`、`scripts/run_batch_mini_swe_agent.sh`、`scripts/run_single_opencollab.sh` |
+| `review-only` | 对已有 trajectory 标准化并预标注 | `scripts/run_single_agent_work_review.sh`、`scripts/run_batch_agent_work_review.sh` |
 | `full` | trajectory、官方 evaluation、review 顺序执行 | `scripts/run_pipeline.sh` |
 
 也可直接使用统一 CLI：
 
 ```bash
-.venv/bin/python main.py --config config/example.yaml --mode full
+.venv/bin/python main.py --config config/example.yaml --mode full --n-workers 4
 ```
 
 `INSTANCE` 或 `generation.instance` 支持三种选择方式：
@@ -273,6 +282,8 @@ REVIEW_MODEL=你的_Reviewer_模型
 - `-1`，遍历配置路径下的全部任务。
 
 批量运行前建议先用一个 instance 验证镜像、模型、官方 evaluation 和 Reviewer 输出，再逐步提高并发或任务量。
+
+`n_workers` 只控制每个阶段内部的并发：所有 trajectory 完成后才开始 evaluation，所有 evaluation 完成后才开始 review。服务器运行脚本时修改顶部的 `N_WORKERS`；并发受 Docker 内存和模型 API 限流约束，建议从 `4` 开始。
 
 ## 关键配置
 
@@ -284,6 +295,7 @@ REVIEW_MODEL=你的_Reviewer_模型
 | `generation.model` | Coding Agent 模型 |
 | `generation.benchmark_path` | parquet 文件或目录 |
 | `generation.instance` | 行号、instance ID 或 `-1` |
+| `n_workers` / `--n-workers` | 每个阶段的最大并发数；阶段之间仍按顺序等待 |
 | `generation.step_limit` | Agent 最大步骤数 |
 | `generation.cost_limit` | Agent 运行成本上限 |
 | `generation.environment_kwargs.pull_timeout` | Docker 启动与镜像拉取等待时间 |

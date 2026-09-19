@@ -2,7 +2,7 @@ import os
 import sys
 
 import main
-from main import apply_overrides, model_env
+from main import apply_overrides, configure_n_workers, model_env
 
 
 def test_script_overrides_nested_config():
@@ -11,6 +11,18 @@ def test_script_overrides_nested_config():
     apply_overrides(config, ["generation.instance=-1", "review.use_cache=false"])
 
     assert config == {"generation": {"instance": -1}, "review": {"use_cache": False}}
+
+
+def test_n_workers_applies_to_each_phase():
+    config = {}
+
+    assert configure_n_workers(config, 4)
+    assert config == {
+        "n_workers": 4,
+        "generation": {"n_workers": 4},
+        "evaluation": {"max_workers": 4},
+        "review": {"n_workers": 4},
+    }
 
 
 def test_model_env_does_not_alias_credentials(monkeypatch):

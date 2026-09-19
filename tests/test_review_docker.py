@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +18,7 @@ def test_docker_review_rebuilds_patch_uses_tools_and_cleans_up(
     monkeypatch, tmp_path, image_head
 ):
     calls = []
+    api_barrier = threading.Barrier(len(ANNOTATION_AGENTS))
 
     def fake_run(args, **kwargs):
         calls.append((args, kwargs.get("input")))
@@ -45,6 +47,7 @@ def test_docker_review_rebuilds_patch_uses_tools_and_cleans_up(
     class FakeCompletions:
         def create(self, **request):
             if not any(message["role"] == "tool" for message in request["messages"]):
+                api_barrier.wait(timeout=3)
                 answer = SimpleNamespace(content=None, tool_calls=[ToolCall()])
             else:
                 assert "exit_code: 0" in request["messages"][-1]["content"]
@@ -101,6 +104,7 @@ def test_docker_review_rebuilds_patch_uses_tools_and_cleans_up(
         max_new_tokens=128,
         timeout_seconds=1,
         max_retries=0,
+        n_workers=4,
         extra_body=None,
         cache_dir=tmp_path / "cache",
         output_dir=tmp_path / "out",
