@@ -3,6 +3,7 @@ set -e
 cd "$(dirname "$0")/.."
 
 CONFIG=config/example.yaml
+N_WORKERS=4
 
 # Trajectory generation
 HARNESS=mini_swe_agent
@@ -23,7 +24,6 @@ PULL_TIMEOUT=900
 # Official SWE-bench evaluation
 RUN_OFFICIAL_EVALUATION=true
 EVALUATION_TIMEOUT=1800
-EVALUATION_MAX_WORKERS=1
 EVALUATION_OPEN_FILE_LIMIT=4096
 
 # Review
@@ -43,7 +43,7 @@ MAX_STEP_CHARS=6000
 MAX_TOTAL_STEP_CHARS=60000
 CLEANUP_POLICY=on_success
 
-exec .venv/bin/python main.py --config "$CONFIG" --mode full \
+exec .venv/bin/python main.py --config "$CONFIG" --mode full --n-workers "$N_WORKERS" \
   --set generation.harness="$HARNESS" \
   --set generation.model="$GENERATION_MODEL" \
   --set generation.runtime="$RUNTIME" \
@@ -61,7 +61,6 @@ exec .venv/bin/python main.py --config "$CONFIG" --mode full \
   --set evaluation.enabled="$RUN_OFFICIAL_EVALUATION" \
   --set evaluation.runner=official_swebench \
   --set evaluation.timeout="$EVALUATION_TIMEOUT" \
-  --set evaluation.max_workers="$EVALUATION_MAX_WORKERS" \
   --set evaluation.open_file_limit="$EVALUATION_OPEN_FILE_LIMIT" \
   --set review.dataset="$DATASET" \
   --set review.runner="$RUNNER" \

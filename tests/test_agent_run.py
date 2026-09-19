@@ -1,10 +1,16 @@
 import json
+import os
 import sys
+import threading
 import types
 from pathlib import Path
 
 from agentic_review_annotation_distilabel.agents import run
 from agentic_review_annotation_distilabel.agents.base import AgentConfig, trajectory_filename
+from agentic_review_annotation_distilabel.agents.mini_swe_agent import (
+    MiniSWEAgent,
+    _container_platform,
+)
 from agentic_review_annotation_distilabel.agents.opencollab import OpenCollabAgent
 from agentic_review_annotation_distilabel.agents.run import (
     load_instance,
@@ -57,6 +63,175 @@ def test_existing_matching_trajectory_skips_generation(tmp_path, monkeypatch, ca
     path.write_text(json.dumps({"instance_id": "another-task"}), encoding="utf-8")
     run.main()
     assert generated == [problem]
+
+
+def test_batch_instances_run_concurrently_with_isolated_configs(
+    tmp_path, monkeypatch, capsys
+):
+    rows = [
+        {
+            "instance_id": "task-1",
+            "problem_statement": "Fix one.",
+            "image": "image-1",
+        },
+        {
+            "instance_id": "task-2",
+            "problem_statement": "Fix two.",
+            "image": "image-2",
+        },
+    ]
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "generation:\n"
+        "  harness: mini_swe_agent\n"
+        "  model: test/model\n"
+        "  runtime: docker\n"
+        "  benchmark_path: unused\n"
+        "  instance: -1\n"
+        "  n_workers: 2\n",
+        encoding="utf-8",
+    )
+    barrier = threading.Barrier(2)
+    worker_configs = []
+
+    class FakeAgent:
+        def __init__(self, config):
+            self.config = config
+
+        def run(self, task):
+            worker_configs.append(
+                (self.config.instance_id, self.config.docker_image, task)
+            )
+            barrier.wait(timeout=3)
+            path = tmp_path / f"{self.config.instance_id}.json"
+            path.write_text("{}", encoding="utf-8")
+            return {"output_path": str(path)}
+
+    monkeypatch.setenv("LLM_API_KEY", "test")
+    monkeypatch.setattr(run, "load_instances", lambda path, selector: rows)
+    monkeypatch.setitem(run.AGENTS, "mini_swe_agent", FakeAgent)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["agents.run", "--config", str(config_path), "--output-dir", str(tmp_path)],
+    )
+
+    run.main()
+
+    assert sorted(worker_configs) == [
+        ("task-1", "image-1", "Fix one."),
+        ("task-2", "image-2", "Fix two."),
+    ]
+    assert "2/2" in capsys.readouterr().err
+
+
+def test_batch_saves_successes_before_reporting_failures(tmp_path, monkeypatch, capsys):
+    rows = [
+        {"instance_id": "good", "problem_statement": "Fix good."},
+        {"instance_id": "bad", "problem_statement": "Fix bad."},
+    ]
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "generation:\n"
+        "  harness: mini_swe_agent\n"
+        "  model: test/model\n"
+        "  benchmark_path: unused\n"
+        "  instance: -1\n"
+        "  n_workers: 2\n",
+        encoding="utf-8",
+    )
+    completed = []
+
+    class FakeAgent:
+        def __init__(self, config):
+            self.config = config
+
+        def run(self, task):
+            completed.append(self.config.instance_id)
+            if self.config.instance_id == "bad":
+                raise RuntimeError("boom")
+            path = tmp_path / trajectory_filename(
+                "mini_swe_agent", "test/model", task
+            )
+            path.write_text(
+                json.dumps(
+                    {
+                        "harness": "mini_swe_agent",
+                        "instance_id": "good",
+                        "problem": task,
+                        "messages": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return {"output_path": str(path)}
+
+    monkeypatch.setenv("LLM_API_KEY", "test")
+    monkeypatch.setattr(run, "load_instances", lambda path, selector: rows)
+    monkeypatch.setitem(run.AGENTS, "mini_swe_agent", FakeAgent)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["agents.run", "--config", str(config_path), "--output-dir", str(tmp_path)],
+    )
+
+    for _ in range(2):
+        try:
+            run.main()
+        except SystemExit as exc:
+            assert "rerun the same command to resume" in str(exc)
+        else:
+            raise AssertionError("partial batch failure should be reported")
+
+    assert completed.count("good") == 1
+    assert completed.count("bad") == 2
+    assert "reusing trajectory:" in capsys.readouterr().out
+
+
+def test_agent_save_atomically_replaces_trajectory(tmp_path, monkeypatch):
+    config = AgentConfig(
+        harness="mini_swe_agent",
+        model="test/model",
+        output_dir=tmp_path,
+    )
+    agent = object.__new__(MiniSWEAgent)
+    agent.config = config
+    replacements = []
+    real_replace = os.replace
+
+    def record_replace(source, destination):
+        replacements.append((source, destination))
+        real_replace(source, destination)
+
+    monkeypatch.setattr(
+        "agentic_review_annotation_distilabel.agents.base.os.replace",
+        record_replace,
+    )
+
+    path = agent.save("Fix it.", {"messages": []})
+
+    assert len(replacements) == 1
+    assert Path(replacements[0][0]).parent == tmp_path
+    assert replacements[0][1] == path
+    assert json.loads(path.read_text(encoding="utf-8")) == {"messages": []}
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_container_platform_comes_from_container():
+    class FakeEnvironment:
+        def execute(self, action):
+            assert action == {"command": "uname -s; uname -r; uname -v; uname -m"}
+            return {
+                "returncode": 0,
+                "output": "Linux\n6.8.0\n#1 SMP\nx86_64\n",
+            }
+
+    assert _container_platform(FakeEnvironment()) == {
+        "system": "Linux",
+        "release": "6.8.0",
+        "version": "#1 SMP",
+        "machine": "x86_64",
+    }
 
 
 def test_loads_first_swebench_image(tmp_path, monkeypatch):

@@ -74,6 +74,8 @@ class MiniSWEAgent(Agent):
         )
         self._env = get_environment(env_config)
         self._agent = get_agent(get_model(config=model_config), self._env, agent_config)
+        if config.runtime == "docker":
+            self._agent.extra_template_vars.update(_container_platform(self._env))
 
     def run(self, problem: str) -> dict[str, Any]:
         try:
@@ -184,3 +186,23 @@ class MiniSWEAgent(Agent):
             "snapshot_kind": "agent_final",
             "cleanup_images": cleanup_images,
         }
+
+
+def _container_platform(environment: Any) -> dict[str, str]:
+    result = environment.execute(
+        {"command": "uname -s; uname -r; uname -v; uname -m"}
+    )
+    values = str(result.get("output") or "").strip().splitlines()
+    if result.get("returncode") == 0 and len(values) == 4:
+        return dict(
+            zip(("system", "release", "version", "machine"), values, strict=True)
+        )
+    logging.getLogger("minisweagent").warning(
+        "Could not read container platform information; using Docker defaults"
+    )
+    return {
+        "system": "Linux",
+        "release": "unknown",
+        "version": "Docker container",
+        "machine": "unknown",
+    }

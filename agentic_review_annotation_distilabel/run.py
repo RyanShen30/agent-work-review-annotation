@@ -133,6 +133,7 @@ def main() -> None:
         docker_platform=config.get("docker_platform"),
         command_timeout=int(config.get("command_timeout", 120)),
         max_tool_calls=int(config.get("max_tool_calls", 12)),
+        n_workers=int(config.get("n_workers", 1)),
         model=model_config.get("model") or ("mock" if runner == "mock" else "gpt-4.1"),
         api_key=api_key,
         base_url=base_url,
@@ -157,7 +158,7 @@ def main() -> None:
             "Missing API key: export LLM_API_KEY or run with --runner mock."
         )
 
-    saved = run_and_save_each(rows, pipeline_config, output_dir)
+    saved = run_and_save(rows, pipeline_config, output_dir)
     print(f"done: queued={len(rows)} saved={saved} output_dir={output_dir}")
 
 
@@ -741,33 +742,20 @@ def build_extra_body(
     return None
 
 
-def run_and_save_each(
+def run_and_save(
     rows: list[dict[str, Any]],
     pipeline_config: DistilabelPipelineConfig,
     output_dir: Path,
 ) -> int:
-    saved = 0
-    failures: list[str] = []
-
-    for index, row in enumerate(rows, start=1):
-        instance_id = row["instance_id"]
-        print(f"annotating {index}/{len(rows)}: {instance_id}")
-        try:
-            annotated_rows = run_annotation_pipeline([row], pipeline_config)
-            saved += save_annotation_outputs(
-                annotated_rows,
-                output_dir=output_dir,
-                model=pipeline_config.model,
-            )
-        except Exception as exc:
-            failures.append(f"{instance_id}: {exc}")
-            print(f"failed: {instance_id}: {exc}")
-
-    if failures:
-        joined = "\n".join(f"- {failure}" for failure in failures)
-        raise RuntimeError(f"Some samples failed:\n{joined}")
-
-    return saved
+    if not rows:
+        return 0
+    print(f"annotating {len(rows)} samples with {pipeline_config.n_workers} workers")
+    annotated_rows = run_annotation_pipeline(rows, pipeline_config)
+    return save_annotation_outputs(
+        annotated_rows,
+        output_dir=output_dir,
+        model=pipeline_config.model,
+    )
 
 
 def load_config(path: Path | None) -> dict[str, Any]:

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Literal
@@ -29,6 +31,7 @@ class AgentConfig(BaseModel):
     step_limit: int = Field(default=50, ge=0)
     cost_limit: float = Field(default=3.0, ge=0)
     command_timeout: int = Field(default=30, gt=0)
+    n_workers: int = Field(default=1, gt=0)
     output_dir: Path = PROJECT_ROOT / "output" / "traj"
     model_kwargs: dict[str, Any] = Field(default_factory=dict)
     environment_kwargs: dict[str, Any] = Field(default_factory=dict)
@@ -72,10 +75,26 @@ class Agent(ABC):
             output_dir = PROJECT_ROOT / output_dir
         output_dir.mkdir(parents=True, exist_ok=True)
         path = output_dir / self.output_name(problem)
-        path.write_text(
+        payload = (
             json.dumps(drop_secrets(result), ensure_ascii=False, indent=2, default=str)
             + "\n"
         )
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=output_dir,
+                prefix=f".{path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                handle.write(payload)
+                temporary = Path(handle.name)
+            os.replace(temporary, path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
         return path
 
     def output_name(self, problem: str) -> str:

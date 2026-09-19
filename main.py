@@ -34,14 +34,22 @@ def main() -> None:
         action="store_true",
         help="Re-run review for existing annotations.",
     )
+    parser.add_argument(
+        "--n-workers",
+        type=int,
+        help="Maximum workers used inside each pipeline phase.",
+    )
     parser.add_argument("--set", action="append", default=[], metavar="PATH=VALUE")
     args = parser.parse_args()
 
     config = yaml.safe_load(args.config.read_text(encoding="utf-8")) or {}
     apply_overrides(config, args.set)
+    workers_changed = configure_n_workers(config, args.n_workers)
     cleanup_policy = config.get("cleanup_policy", "on_success")
     validate_cleanup_policy(cleanup_policy)
-    config_path = effective_config(config, args.config, bool(args.set))
+    config_path = effective_config(
+        config, args.config, bool(args.set) or workers_changed
+    )
     mode = args.mode or config.get("mode", "full")
     env = model_env()
 
@@ -165,6 +173,19 @@ def apply_overrides(config: dict, overrides: list[str]) -> None:
         for part in parts[:-1]:
             target = target.setdefault(part, {})
         target[parts[-1]] = yaml.safe_load(raw_value)
+
+
+def configure_n_workers(config: dict, override: int | None) -> bool:
+    if override is None and "n_workers" not in config:
+        return False
+    n_workers = int(override if override is not None else config["n_workers"])
+    if n_workers <= 0:
+        raise ValueError("n_workers must be greater than zero")
+    config["n_workers"] = n_workers
+    config.setdefault("generation", {})["n_workers"] = n_workers
+    config.setdefault("evaluation", {})["max_workers"] = n_workers
+    config.setdefault("review", {})["n_workers"] = n_workers
+    return True
 
 
 def effective_config(config: dict, original: Path, changed: bool) -> Path:

@@ -3,13 +3,13 @@ set -e
 cd "$(dirname "$0")/.."
 
 CONFIG=config/example.yaml
+N_WORKERS=4
 
-# Trajectory generation
+# Trajectory generation for every instance in the benchmark path
 HARNESS=mini_swe_agent
-MODEL=deepseek-flash
+MODEL=deepseek/deepseek-flash
 RUNTIME=docker
 BENCHMARK_PATH=data/SWE-bench_Verified
-INSTANCE=1
 WORKSPACE=.
 STEP_LIMIT=50
 COST_LIMIT=3.0
@@ -20,12 +20,12 @@ SAVE_FINAL_SNAPSHOT=true
 CWD=/testbed
 PULL_TIMEOUT=900
 
-exec .venv/bin/python main.py --config "$CONFIG" --mode traj-only \
+exec .venv/bin/python main.py --config "$CONFIG" --mode traj-only --n-workers "$N_WORKERS" \
   --set generation.harness="$HARNESS" \
   --set generation.model="$MODEL" \
   --set generation.runtime="$RUNTIME" \
   --set generation.benchmark_path="$BENCHMARK_PATH" \
-  --set generation.instance="$INSTANCE" \
+  --set generation.instance=-1 \
   --set generation.workspace="$WORKSPACE" \
   --set generation.step_limit="$STEP_LIMIT" \
   --set generation.cost_limit="$COST_LIMIT" \

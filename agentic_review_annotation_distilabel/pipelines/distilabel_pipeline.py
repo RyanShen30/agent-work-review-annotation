@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Literal
 
@@ -28,6 +29,7 @@ class DistilabelPipelineConfig:
         docker_platform: str | None = None,
         command_timeout: int = 120,
         max_tool_calls: int = 12,
+        n_workers: int = 1,
         model: str,
         api_key: str | None,
         base_url: str | None,
@@ -42,9 +44,9 @@ class DistilabelPipelineConfig:
     ) -> None:
         if runtime not in {"local", "docker"}:
             raise ValueError("review.runtime must be 'local' or 'docker'")
-        if command_timeout <= 0 or max_tool_calls < 0:
+        if command_timeout <= 0 or max_tool_calls < 0 or n_workers <= 0:
             raise ValueError(
-                "review command_timeout must be positive and max_tool_calls nonnegative"
+                "review command_timeout and n_workers must be positive and max_tool_calls nonnegative"
             )
         self.runner = runner
         self.runtime = runtime
@@ -53,6 +55,7 @@ class DistilabelPipelineConfig:
         self.docker_platform = docker_platform
         self.command_timeout = command_timeout
         self.max_tool_calls = max_tool_calls
+        self.n_workers = n_workers
         self.model = model
         self.api_key = api_key
         self.base_url = base_url
@@ -115,21 +118,32 @@ def _run_docker_annotation(
         run_agentic_annotator,
     )
 
-    generations_by_instance: dict[str, dict[str, str]] = {}
-    with OpenAI(
-        api_key=config.api_key,
-        base_url=config.base_url,
-        timeout=config.timeout_seconds,
-        max_retries=config.max_retries,
-    ) as client:
-        for row in rows:
-            instance_id = str(row["instance_id"])
-            generations_by_instance[instance_id] = {}
-            for agent in ANNOTATION_AGENTS:
-                with review_container(row, config) as run_command:
-                    generations_by_instance[instance_id][agent.name] = (
-                        run_agentic_annotator(row, agent, config, client, run_command)
-                    )
+    generations_by_instance: dict[str, dict[str, str]] = {
+        str(row["instance_id"]): {} for row in rows
+    }
+
+    def annotate(
+        job: tuple[dict[str, Any], AnnotationAgentSpec],
+    ) -> tuple[str, str, str]:
+        row, agent = job
+        with OpenAI(
+            api_key=config.api_key,
+            base_url=config.base_url,
+            timeout=config.timeout_seconds,
+            max_retries=config.max_retries,
+        ) as client:
+            with review_container(row, config) as run_command:
+                generation = run_agentic_annotator(
+                    row, agent, config, client, run_command
+                )
+        return str(row["instance_id"]), agent.name, generation
+
+    jobs = ((row, agent) for row in rows for agent in ANNOTATION_AGENTS)
+    with ThreadPoolExecutor(max_workers=config.n_workers) as executor:
+        results = list(executor.map(annotate, jobs))
+
+    for instance_id, agent_name, generation in results:
+        generations_by_instance[instance_id][agent_name] = generation
     return _merge_annotator_generations(
         rows,
         generations_by_instance=generations_by_instance,
@@ -170,7 +184,9 @@ def _run_single_annotator_pipeline(
         description=f"Auto-annotate {agent.name} for SWE agent trajectories.",
         cache_dir=str(config.cache_dir),
     ) as pipeline:
-        load_data = LoadDataFromDicts(name="load_data", data=task_rows, batch_size=1)
+        load_data = LoadDataFromDicts(
+            name="load_data", data=task_rows, batch_size=config.n_workers
+        )
 
         from distilabel.models.llms import OpenAILLM
         from distilabel.steps.tasks import TextGeneration
@@ -192,7 +208,7 @@ def _run_single_annotator_pipeline(
                 },
             ),
             system_prompt=agent.system_prompt,
-            input_batch_size=1,
+            input_batch_size=config.n_workers,
             use_cache=True,
         )
 
