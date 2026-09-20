@@ -292,7 +292,9 @@ REVIEW_MODEL=你的_Reviewer_模型
 | 配置 | 含义 |
 | --- | --- |
 | `generation.harness` | `mini_swe_agent`、`opencollab` 或 `openhands` |
+| `generation.dataset` | 默认 `auto`；也可设 `swebench_verified`、`swebench_pro` 或 `swebench_multilingual`，决定官方镜像和工作目录 |
 | `generation.model` | Coding Agent 模型 |
+| `generation.platform` | Docker 宿主平台：`mac` 会添加 `--platform linux/amd64`，`linux` 不添加，`auto` 自动识别 |
 | `generation.benchmark_path` | parquet 文件或目录 |
 | `generation.instance` | 行号、instance ID 或 `-1` |
 | `n_workers` / `--n-workers` | 每个阶段的最大并发数；阶段之间仍按顺序等待 |
@@ -310,6 +312,8 @@ REVIEW_MODEL=你的_Reviewer_模型
 | `cleanup_policy` | `always`、`on_success` 或 `never` |
 
 修改 prompt、Reviewer 模型或标注逻辑后重新评审旧轨迹时，应使用 `--overwrite`，并在需要时关闭缓存，避免误用旧结果。
+
+SWE-bench Pro 的 adapter 支持 generation 和 review；其官方评测使用独立 harness，当前运行时需设置 `evaluation.enabled: false`。
 
 ## 仓库快照与官方评测
 

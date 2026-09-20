@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -58,7 +59,7 @@ class MiniSWEAgent(Agent):
         )
         if config.runtime == "docker":
             env_config["image"] = config.docker_image
-            env_config.setdefault("run_args", ["--rm", "--platform", "linux/amd64"])
+            env_config.setdefault("run_args", _docker_run_args(config.platform))
 
         agent_config = raw["agent"] | {
             "agent_class": "default",
@@ -206,3 +207,11 @@ def _container_platform(environment: Any) -> dict[str, str]:
         "version": "Docker container",
         "machine": "unknown",
     }
+
+
+def _docker_run_args(platform: str) -> list[str]:
+    if platform == "auto":
+        platform = "mac" if sys.platform == "darwin" else "linux"
+    if platform == "mac":
+        return ["--rm", "--platform", "linux/amd64"]
+    return ["--rm"]

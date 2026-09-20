@@ -5,9 +5,11 @@ n_workers: 1  # maximum concurrency inside each phase; phases still run in order
 
 generation:
   harness: mini_swe_agent  # mini_swe_agent, openhands, or opencollab
+  dataset: auto  # inferred from benchmark_path; explicit names are also accepted
   model: openai/gpt-5.4
   runtime: docker
-  benchmark_path: data/swe-bench-verified/test.parquet
+  platform: auto  # auto, mac, or linux; controls the Docker image startup command
+  benchmark_path: data/SWE-bench_Verified
   instance: 10  # row index, instance_id, or -1 for the entire benchmark
   workspace: .
   step_limit: 50
@@ -18,7 +20,6 @@ generation:
   environment_kwargs:
     keep_image: true
     save_final_snapshot: true  # mini-swe-agent Docker runs only
-    cwd: /testbed
     pull_timeout: 900
   # OpenCollab-only options. Team mode records collaboration in trajectory.jsonl.
   harness_kwargs: {}

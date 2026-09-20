@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -39,8 +40,9 @@ class OpenHandsAgent(Agent):
         from openhands.sdk import Conversation
 
         workspace: Any = str(self.config.workspace.resolve())
-        keep_image = self.config.environment_kwargs.pop("keep_image", False)
-        self.config.environment_kwargs.pop("save_final_snapshot", None)
+        environment_kwargs = dict(self.config.environment_kwargs)
+        keep_image = environment_kwargs.pop("keep_image", False)
+        environment_kwargs.pop("save_final_snapshot", None)
         if self.config.runtime == "docker":
             from openhands.workspace import DockerDevWorkspace
 
@@ -49,17 +51,17 @@ class OpenHandsAgent(Agent):
             # The coding preset has no browser tool, so skip its optional Chromium preload.
             os.environ["OH_PRELOAD_TOOLS"] = "false"
             forward_env = [
-                *self.config.environment_kwargs.pop("forward_env", ["DEBUG"]),
+                *environment_kwargs.pop("forward_env", ["DEBUG"]),
                 "OH_PRELOAD_TOOLS",
             ]
             workspace = DockerDevWorkspace(
                 base_image=self.config.docker_image,
                 target="source-minimal",
                 platform="linux/amd64",
-                working_dir="/testbed",
+                working_dir=environment_kwargs.pop("cwd", "/testbed"),
                 forward_env=forward_env,
                 cleanup_image=not keep_image,
-                **self.config.environment_kwargs,
+                **environment_kwargs,
             )
 
         conversation = Conversation(
@@ -112,9 +114,11 @@ class OpenHandsAgent(Agent):
     def _patch(self, workspace: Any) -> str | None:
         if not self.config.base_commit:
             return None
+        cwd = shlex.quote(self.config.environment_kwargs.get("cwd", "/testbed"))
         try:
             result = workspace.execute_command(
-                f"git -c safe.directory=/testbed --no-pager diff --no-color {self.config.base_commit}",
+                f"git -c safe.directory={cwd} --no-pager diff --no-color "
+                f"{self.config.base_commit}",
                 timeout=self.config.command_timeout,
             )
         except Exception:

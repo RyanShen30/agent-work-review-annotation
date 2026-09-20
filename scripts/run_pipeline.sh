@@ -7,10 +7,12 @@ N_WORKERS=4
 
 # Trajectory generation
 HARNESS=mini_swe_agent
+GENERATION_DATASET=auto
 GENERATION_MODEL=deepseek/deepseek-flash
 RUNTIME=docker
-BENCHMARK_PATH=data/swe-bench-verified/test.parquet
-INSTANCE=10
+PLATFORM=mac
+BENCHMARK_PATH=data/SWE-bench_Verified
+INSTANCE=100
 WORKSPACE=.
 STEP_LIMIT=50
 COST_LIMIT=3.0
@@ -18,7 +20,6 @@ COMMAND_TIMEOUT=120
 DROP_PARAMS=true
 KEEP_IMAGE=true
 SAVE_FINAL_SNAPSHOT=true
-CWD=/testbed
 PULL_TIMEOUT=900
 
 # Official SWE-bench evaluation
@@ -31,7 +32,7 @@ DATASET=mini_swe_agent
 RUNNER=llm
 REVIEW_RUNTIME=docker
 USE_CACHE=true
-REVIEW_MODEL=deepseek-flash
+REVIEW_MODEL=deepseek-v4-pro
 TEMPERATURE=0.0
 MAX_NEW_TOKENS=4096
 TIMEOUT_SECONDS=120
@@ -45,8 +46,10 @@ CLEANUP_POLICY=on_success
 
 exec .venv/bin/python main.py --config "$CONFIG" --mode full --n-workers "$N_WORKERS" \
   --set generation.harness="$HARNESS" \
+  --set generation.dataset="$GENERATION_DATASET" \
   --set generation.model="$GENERATION_MODEL" \
   --set generation.runtime="$RUNTIME" \
+  --set generation.platform="$PLATFORM" \
   --set generation.benchmark_path="$BENCHMARK_PATH" \
   --set generation.instance="$INSTANCE" \
   --set generation.workspace="$WORKSPACE" \
@@ -56,7 +59,6 @@ exec .venv/bin/python main.py --config "$CONFIG" --mode full --n-workers "$N_WOR
   --set generation.model_kwargs.drop_params="$DROP_PARAMS" \
   --set generation.environment_kwargs.keep_image="$KEEP_IMAGE" \
   --set generation.environment_kwargs.save_final_snapshot="$SAVE_FINAL_SNAPSHOT" \
-  --set generation.environment_kwargs.cwd="$CWD" \
   --set generation.environment_kwargs.pull_timeout="$PULL_TIMEOUT" \
   --set evaluation.enabled="$RUN_OFFICIAL_EVALUATION" \
   --set evaluation.runner=official_swebench \

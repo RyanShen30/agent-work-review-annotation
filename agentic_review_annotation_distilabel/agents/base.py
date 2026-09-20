@@ -20,6 +20,10 @@ class AgentConfig(BaseModel):
     harness: Literal["mini_swe_agent", "openhands", "opencollab"]
     model: str
     runtime: Literal["local", "docker"] = "local"
+    platform: Literal["auto", "mac", "linux"] = "auto"
+    dataset: Literal[
+        "auto", "swebench_verified", "swebench_pro", "swebench_multilingual"
+    ] = "auto"
     workspace: Path = Path(".")
     benchmark_path: Path | None = None
     instance: int | str = 0
@@ -64,9 +68,7 @@ class Agent(ABC):
             review_workspace.setdefault("image", self.config.docker_image)
             review_workspace.setdefault(
                 "cwd",
-                "/testbed"
-                if self.harness_name == "openhands"
-                else self.config.environment_kwargs.get("cwd", default_cwd),
+                self.config.environment_kwargs.get("cwd", default_cwd),
             )
             review_workspace.setdefault("base_commit", self.config.base_commit)
             result["review_workspace"] = review_workspace

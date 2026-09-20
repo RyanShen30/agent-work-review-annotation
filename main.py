@@ -51,12 +51,23 @@ def main() -> None:
         config, args.config, bool(args.set) or workers_changed
     )
     mode = args.mode or config.get("mode", "full")
+    generation = config.get("generation", {})
+    if mode == "full" and bool(config.get("evaluation", {}).get("enabled", False)):
+        from agentic_review_annotation_distilabel.datasets import get_dataset_adapter
+
+        adapter = get_dataset_adapter(
+            generation.get("dataset", "auto"), generation.get("benchmark_path")
+        )
+        if adapter.name == "swebench_pro":
+            raise ValueError(
+                "SWE-bench Pro requires its dedicated evaluator; set "
+                "evaluation.enabled=false for generation/review-only runs"
+            )
     env = model_env()
 
     trajectory: Path | None = None
     generated_trajectories: list[Path] = []
     if mode in {"traj-only", "full"}:
-        generation = config.get("generation", {})
         harness = generation.get("harness", "mini_swe_agent")
         thirdparty_names = {
             "mini_swe_agent": "mini-swe-agent",

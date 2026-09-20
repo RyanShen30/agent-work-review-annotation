@@ -147,3 +147,37 @@ def test_full_mode_runs_official_evaluation_before_review(tmp_path, monkeypatch)
         "-m",
         "agentic_review_annotation_distilabel.run",
     ]
+
+
+def test_full_mode_rejects_swebench_pro_evaluation_before_generation(
+    tmp_path, monkeypatch
+):
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "mode: full\n"
+        "generation:\n"
+        "  harness: mini_swe_agent\n"
+        "  dataset: swebench_pro\n"
+        "  benchmark_path: data/SWE-bench_Pro\n"
+        "evaluation:\n"
+        "  enabled: true\n",
+        encoding="utf-8",
+    )
+    called = False
+
+    def fake_run(command, env):
+        nonlocal called
+        called = True
+        return ""
+
+    monkeypatch.setattr(main, "run", fake_run)
+    monkeypatch.setattr(sys, "argv", ["main.py", "--config", str(config)])
+
+    try:
+        main.main()
+    except ValueError as exc:
+        assert "dedicated evaluator" in str(exc)
+    else:
+        raise AssertionError("SWE-bench Pro evaluation should fail before generation")
+
+    assert not called

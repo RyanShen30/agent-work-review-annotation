@@ -6,24 +6,25 @@ CONFIG=config/example.yaml
 
 # Trajectory generation
 HARNESS=opencollab
+DATASET=auto
 MODEL=openai/gpt-5.4
 PROVIDER=openai
 MODE=team
 TOKEN_BUDGET=1000000
 TEAM_CONFIG=config/opencollab_team.yaml
 RUNTIME=docker
-BENCHMARK_PATH=data/swe-bench-verified/SWE-bench_Verified
+BENCHMARK_PATH=data/SWE-bench_Verified
 INSTANCE=10
 WORKSPACE=.
 STEP_LIMIT=50
 COMMAND_TIMEOUT=120
-CWD=/testbed
 USE_WORKTREES=true
 PREBUILD_TEAM=false
 SERIALIZE_TURNS=false
 
 exec .venv/bin/python main.py --config "$CONFIG" --mode traj-only \
   --set generation.harness="$HARNESS" \
+  --set generation.dataset="$DATASET" \
   --set generation.model="$MODEL" \
   --set generation.runtime="$RUNTIME" \
   --set generation.benchmark_path="$BENCHMARK_PATH" \
@@ -31,7 +32,6 @@ exec .venv/bin/python main.py --config "$CONFIG" --mode traj-only \
   --set generation.workspace="$WORKSPACE" \
   --set generation.step_limit="$STEP_LIMIT" \
   --set generation.command_timeout="$COMMAND_TIMEOUT" \
-  --set generation.environment_kwargs.cwd="$CWD" \
   --set generation.harness_kwargs.mode="$MODE" \
   --set generation.harness_kwargs.provider="$PROVIDER" \
   --set generation.harness_kwargs.budget="$TOKEN_BUDGET" \

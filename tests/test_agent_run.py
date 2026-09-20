@@ -1,18 +1,21 @@
 import json
 import os
+import subprocess
 import sys
 import threading
 import types
 from pathlib import Path
 
+from agentic_review_annotation_distilabel import datasets
 from agentic_review_annotation_distilabel.agents import run
 from agentic_review_annotation_distilabel.agents.base import AgentConfig, trajectory_filename
 from agentic_review_annotation_distilabel.agents.mini_swe_agent import (
     MiniSWEAgent,
     _container_platform,
+    _docker_run_args,
 )
 from agentic_review_annotation_distilabel.agents.opencollab import OpenCollabAgent
-from agentic_review_annotation_distilabel.agents.run import (
+from agentic_review_annotation_distilabel.datasets import (
     load_instance,
     load_instances,
     swebench_image,
@@ -21,7 +24,7 @@ from agentic_review_annotation_distilabel.agents.run import (
 
 def test_minus_one_loads_entire_benchmark(monkeypatch):
     rows = [{"instance_id": "one"}, {"instance_id": "two"}]
-    monkeypatch.setattr(run, "load_benchmark", lambda path: rows)
+    monkeypatch.setattr(datasets, "load_benchmark", lambda path: rows)
 
     assert load_instances("benchmark", -1) == rows
 
@@ -149,7 +152,9 @@ def test_batch_saves_successes_before_reporting_failures(tmp_path, monkeypatch, 
         def run(self, task):
             completed.append(self.config.instance_id)
             if self.config.instance_id == "bad":
-                raise RuntimeError("boom")
+                raise subprocess.CalledProcessError(
+                    125, ["docker", "run"], stderr="docker failed clearly"
+                )
             path = tmp_path / trajectory_filename(
                 "mini_swe_agent", "test/model", task
             )
@@ -185,7 +190,9 @@ def test_batch_saves_successes_before_reporting_failures(tmp_path, monkeypatch, 
 
     assert completed.count("good") == 1
     assert completed.count("bad") == 2
-    assert "reusing trajectory:" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert "reusing trajectory:" in captured.out
+    assert "docker failed clearly" in captured.err
 
 
 def test_agent_save_atomically_replaces_trajectory(tmp_path, monkeypatch):
@@ -217,7 +224,7 @@ def test_agent_save_atomically_replaces_trajectory(tmp_path, monkeypatch):
     assert list(tmp_path.glob("*.tmp")) == []
 
 
-def test_container_platform_comes_from_container():
+def test_container_platform_comes_from_container(monkeypatch):
     class FakeEnvironment:
         def execute(self, action):
             assert action == {"command": "uname -s; uname -r; uname -v; uname -m"}
@@ -232,6 +239,13 @@ def test_container_platform_comes_from_container():
         "version": "#1 SMP",
         "machine": "x86_64",
     }
+    assert _docker_run_args("mac") == ["--rm", "--platform", "linux/amd64"]
+    assert _docker_run_args("linux") == ["--rm"]
+    monkeypatch.setattr(
+        "agentic_review_annotation_distilabel.agents.mini_swe_agent.sys.platform",
+        "darwin",
+    )
+    assert _docker_run_args("auto") == ["--rm", "--platform", "linux/amd64"]
 
 
 def test_loads_first_swebench_image(tmp_path, monkeypatch):

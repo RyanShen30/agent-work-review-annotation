@@ -6,8 +6,10 @@ CONFIG=config/example.yaml
 
 # Trajectory generation
 HARNESS=mini_swe_agent
+DATASET=auto
 MODEL=deepseek/deepseek-flash
 RUNTIME=docker
+PLATFORM=mac
 BENCHMARK_PATH=data/SWE-bench_Verified
 INSTANCE=1
 WORKSPACE=.
@@ -17,13 +19,14 @@ COMMAND_TIMEOUT=120
 DROP_PARAMS=true
 KEEP_IMAGE=true
 SAVE_FINAL_SNAPSHOT=true
-CWD=/testbed
 PULL_TIMEOUT=900
 
 exec .venv/bin/python main.py --config "$CONFIG" --mode traj-only \
   --set generation.harness="$HARNESS" \
+  --set generation.dataset="$DATASET" \
   --set generation.model="$MODEL" \
   --set generation.runtime="$RUNTIME" \
+  --set generation.platform="$PLATFORM" \
   --set generation.benchmark_path="$BENCHMARK_PATH" \
   --set generation.instance="$INSTANCE" \
   --set generation.workspace="$WORKSPACE" \
@@ -33,5 +36,4 @@ exec .venv/bin/python main.py --config "$CONFIG" --mode traj-only \
   --set generation.model_kwargs.drop_params="$DROP_PARAMS" \
   --set generation.environment_kwargs.keep_image="$KEEP_IMAGE" \
   --set generation.environment_kwargs.save_final_snapshot="$SAVE_FINAL_SNAPSHOT" \
-  --set generation.environment_kwargs.cwd="$CWD" \
   --set generation.environment_kwargs.pull_timeout="$PULL_TIMEOUT"

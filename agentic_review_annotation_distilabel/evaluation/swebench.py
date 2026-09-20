@@ -17,7 +17,7 @@ from typing import Any
 
 import yaml
 
-from agentic_review_annotation_distilabel.agents.run import load_benchmark
+from agentic_review_annotation_distilabel.datasets import load_benchmark
 
 REQUIRED_INSTANCE_FIELDS = {
     "instance_id",

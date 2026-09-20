@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 from tqdm import tqdm
 
+from ..datasets import get_dataset_adapter, load_instances
 from .base import AgentConfig, PROJECT_ROOT, trajectory_filename
 from .mini_swe_agent import MiniSWEAgent
 from .opencollab import OpenCollabAgent
@@ -51,11 +52,13 @@ def main() -> None:
     def run_instance(instance: dict[str, Any] | None) -> tuple[Path, bool]:
         worker_config = config.model_copy(deep=True)
         if instance:
+            adapter = get_dataset_adapter(
+                config.dataset, config.benchmark_path, instance
+            )
             worker_config.instance_id = str(instance["instance_id"])
             worker_config.base_commit = instance.get("base_commit")
-            worker_config.docker_image = (
-                configured_image or instance.get("image") or swebench_image(instance)
-            )
+            worker_config.docker_image = configured_image or adapter.image(instance)
+            worker_config.environment_kwargs.setdefault("cwd", adapter.cwd)
             worker_config.benchmark_instance = instance
         problem = args.problem or (instance and instance.get("problem_statement"))
         if not problem:
@@ -90,7 +93,10 @@ def main() -> None:
             try:
                 path, reused = future.result()
             except Exception as exc:
-                failures.append(f"{instance_id}: {type(exc).__name__}: {exc}")
+                detail = getattr(exc, "stderr", None) or str(exc)
+                failures.append(
+                    f"{instance_id}: {type(exc).__name__}: {str(detail).strip()}"
+                )
                 print(f"generation failed: {failures[-1]}", file=sys.stderr)
                 continue
             if reused:
@@ -124,44 +130,6 @@ def reusable_trajectory(path: Path, config: AgentConfig, problem: str) -> bool:
             )
         )
     )
-
-
-def load_instances(path: Path | str, selector: int | str) -> list[dict[str, Any]]:
-    if str(selector) == "-1":
-        return load_benchmark(path)
-    return [load_instance(path, selector)]
-
-
-def load_benchmark(path: Path | str) -> list[dict[str, Any]]:
-    import pandas as pd
-
-    path = Path(path)
-    files = [path] if path.is_file() else sorted(path.rglob("*.parquet"))
-    if not files:
-        raise FileNotFoundError(f"no parquet files under {path}")
-    rows = pd.concat(pd.read_parquet(file) for file in files)
-    return [rows.iloc[index].to_dict() for index in range(len(rows))]
-
-
-def load_instance(path: Path | str, selector: int | str) -> dict[str, Any]:
-    import pandas as pd
-
-    path = Path(path)
-    files = [path] if path.is_file() else sorted(path.rglob("*.parquet"))
-    if not files:
-        raise FileNotFoundError(f"no parquet files under {path}")
-    rows = pd.concat(pd.read_parquet(file) for file in files)
-    if isinstance(selector, int) or str(selector).isdigit():
-        return rows.iloc[int(selector)].to_dict()
-    matches = rows[rows["instance_id"] == selector]
-    if matches.empty:
-        raise KeyError(f"benchmark instance not found: {selector}")
-    return matches.iloc[0].to_dict()
-
-
-def swebench_image(instance: dict[str, Any]) -> str:
-    instance_id = str(instance["instance_id"]).replace("__", "_1776_").lower()
-    return f"swebench/sweb.eval.x86_64.{instance_id}:latest"
 
 
 if __name__ == "__main__":

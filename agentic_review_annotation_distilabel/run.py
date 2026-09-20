@@ -356,14 +356,19 @@ def review_workspace_from_raw(raw: dict[str, Any]) -> dict[str, Any]:
     environment = (
         config.get("environment") if isinstance(config.get("environment"), dict) else {}
     )
-    image = raw.get("image") or swebench.get("image") or environment.get("image")
-    if not image and swebench.get("instance_id"):
-        from agentic_review_annotation_distilabel.agents.run import swebench_image
+    adapter = None
+    if swebench.get("instance_id"):
+        from agentic_review_annotation_distilabel.datasets import get_dataset_adapter
 
-        image = swebench_image(swebench)
+        adapter = get_dataset_adapter(instance=swebench)
+    image = raw.get("image") or swebench.get("image") or environment.get("image")
+    if not image and adapter:
+        image = adapter.image(swebench)
     return {
         "image": image,
-        "cwd": environment.get("cwd") or raw.get("repo_path") or "/testbed",
+        "cwd": environment.get("cwd")
+        or raw.get("repo_path")
+        or (adapter.cwd if adapter else "/testbed"),
         "base_commit": raw.get("base_commit") or swebench.get("base_commit"),
     }
 
