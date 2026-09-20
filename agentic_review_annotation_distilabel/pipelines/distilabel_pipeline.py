@@ -254,7 +254,13 @@ def _mock_specialized_result(
             "rating": "high" if agent.name == "execution_efficiency" else "pass",
             "reason": "The mock reviewer found no dimension-specific run-level issue.",
         },
-        "findings": [],
+        "step_reviews": [
+            {
+                "step_id": int(step["step_id"]),
+                "rating": "high" if agent.name == "execution_efficiency" else "pass",
+            }
+            for step in canonical_steps
+        ],
     }
 
 

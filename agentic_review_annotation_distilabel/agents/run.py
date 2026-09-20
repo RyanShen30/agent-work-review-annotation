@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -12,6 +11,10 @@ import yaml
 from tqdm import tqdm
 
 from .base import AgentConfig, PROJECT_ROOT, trajectory_filename
+from agentic_review_annotation_distilabel.environment import (
+    load_environment,
+    model_credentials,
+)
 from .mini_swe_agent import MiniSWEAgent
 from .opencollab import OpenCollabAgent
 from .openhands import OpenHandsAgent
@@ -33,8 +36,7 @@ def main() -> None:
 
     raw = yaml.safe_load(args.config.read_text()) or {}
     config = AgentConfig.model_validate(raw.get("generation", raw))
-    config.api_key = os.getenv("LLM_API_KEY")
-    config.base_url = os.getenv("LLM_BASE_URL")
+    config.api_key, config.base_url = model_credentials("GENERATION")
     if args.instance is not None:
         config.instance = (
             int(args.instance) if args.instance.isdigit() else args.instance
@@ -69,7 +71,9 @@ def main() -> None:
         if reusable_trajectory(path, worker_config, problem):
             return path, True
         if not worker_config.api_key:
-            raise RuntimeError("export LLM_API_KEY before running")
+            raise RuntimeError(
+                "set GENERATION_LLM_API_KEY or the legacy LLM_API_KEY before running"
+            )
         result = AGENTS[worker_config.harness](worker_config).run(problem)
         return Path(result["output_path"]), False
 
@@ -165,4 +169,5 @@ def swebench_image(instance: dict[str, Any]) -> str:
 
 
 if __name__ == "__main__":
+    load_environment(PROJECT_ROOT / ".env")
     main()

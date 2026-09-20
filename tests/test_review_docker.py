@@ -61,7 +61,12 @@ def test_docker_review_rebuilds_patch_uses_tools_and_cleans_up(
                                 "rating": "high" if is_efficiency else "pass",
                                 "reason": "No issue found during the complete review.",
                             },
-                            "findings": [],
+                            "step_reviews": [
+                                {
+                                    "step_id": 1,
+                                    "rating": "high" if is_efficiency else "pass",
+                                }
+                            ],
                         }
                     ),
                     tool_calls=None,

@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from agentic_review_annotation_distilabel.annotation.prompt_builder import PromptBuilder
-from agentic_review_annotation_distilabel.annotation.schema import EfficiencyStepFinding
+from agentic_review_annotation_distilabel.annotation.schema import EfficiencyStepReview
 from agentic_review_annotation_distilabel.evidence import (
     extract_deterministic_facts,
     facts_for_dimension,
@@ -172,20 +172,13 @@ def test_prompt_builder_routes_deterministic_facts_by_reviewer():
     assert correctness["evaluation"] == {"resolved": False}
 
 
-def test_efficiency_sparse_findings_use_high_as_the_omitted_default():
-    finding = EfficiencyStepFinding(
-        step_id=1,
-        rating="normal",
-        reason="The step did limited unnecessary work.",
-    )
-    assert finding.rating == "normal"
+def test_efficiency_full_step_review_uses_high_as_the_default():
+    review = EfficiencyStepReview(step_id=1, rating="high")
+    assert review.rating == "high"
+    assert review.reason is None
 
     with pytest.raises(ValidationError):
-        EfficiencyStepFinding(
-            step_id=1,
-            rating="high",
-            reason="No efficiency problem.",
-        )
+        EfficiencyStepReview(step_id=2, rating="normal")
 
 
 def test_normalized_preview_keeps_only_deterministic_fact_summary():
