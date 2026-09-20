@@ -190,22 +190,29 @@ log_parser, eval_type, eval_script
 
 ### 5. 配置 API 与模型
 
-主流程当前读取两个环境变量：
+主流程会自动加载项目根目录下、不会提交到 Git 的 `.env`。Coding Agent 和
+Reviewer 可分别连接不同的 OpenAI 兼容服务：
 
 ```bash
-export LLM_API_KEY=你的_API_Key
-export LLM_BASE_URL=https://你的兼容接口/v1
+GENERATION_LLM_API_KEY=你的_Coding_Agent_API_Key
+GENERATION_LLM_BASE_URL=https://Coding_Agent_兼容接口/v1
+
+REVIEW_LLM_API_KEY=你的_Reviewer_API_Key
+REVIEW_LLM_BASE_URL=https://Reviewer_兼容接口/v1
 ```
 
-也可以把它们写进不提交的 `.env`，运行前一次性载入：
+可以从 `.env.example` 开始配置。`.env` 中的值不会覆盖当前终端已经显式设置的
+环境变量，因此临时实验也可以在命令前传入凭证。
+
+旧版单服务配置仍然兼容：
 
 ```bash
-set -a
-source .env
-set +a
+LLM_API_KEY=你的共享_API_Key
+LLM_BASE_URL=https://共享兼容接口/v1
 ```
 
-当前 Coding Agent 和 Reviewer 可以使用不同模型，但共用同一组 `LLM_API_KEY` 与 `LLM_BASE_URL`。如果两个模型来自不同服务，需要通过统一网关暴露在同一兼容端点，或后续扩展为两组独立凭证。
+当同一作用域的专用变量与旧版共享变量同时存在时，`GENERATION_LLM_*` 或
+`REVIEW_LLM_*` 优先。API key 不要写进脚本、YAML 或提交到仓库。
 
 模型与任务配置在脚本顶部直接修改：
 

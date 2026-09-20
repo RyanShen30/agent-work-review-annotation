@@ -11,6 +11,8 @@ from pathlib import Path
 
 import yaml
 
+from agentic_review_annotation_distilabel.environment import load_environment
+
 ROOT = Path(__file__).resolve().parent
 
 
@@ -282,4 +284,5 @@ def run(command: list[str], env: dict[str, str]) -> str:
 
 
 if __name__ == "__main__":
+    load_environment(ROOT / ".env")
     main()

@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +12,11 @@ from agentic_review_annotation_distilabel.adapters import (
     MiniSWEAgentAdapter,
     OpenCollabAdapter,
     OpenHandsAdapter,
+)
+from agentic_review_annotation_distilabel.environment import (
+    PROJECT_ROOT,
+    load_environment,
+    model_credentials,
 )
 from agentic_review_annotation_distilabel.annotation.exporter import (
     export_master,
@@ -123,8 +127,7 @@ def main() -> None:
         prompt_builder=prompt_builder,
     )
 
-    api_key = os.environ.get("LLM_API_KEY")
-    base_url = os.environ.get("LLM_BASE_URL")
+    api_key, base_url = model_credentials("REVIEW")
     pipeline_config = DistilabelPipelineConfig(
         runner=runner,
         runtime=config.get("runtime", "local"),
@@ -155,7 +158,8 @@ def main() -> None:
 
     if runner == "llm" and not pipeline_config.api_key:
         raise RuntimeError(
-            "Missing API key: export LLM_API_KEY or run with --runner mock."
+            "Missing API key: set REVIEW_LLM_API_KEY or the legacy LLM_API_KEY, "
+            "or run with --runner mock."
         )
 
     saved = run_and_save(rows, pipeline_config, output_dir)
@@ -767,4 +771,5 @@ def load_config(path: Path | None) -> dict[str, Any]:
 
 
 if __name__ == "__main__":
+    load_environment(PROJECT_ROOT / ".env")
     main()
