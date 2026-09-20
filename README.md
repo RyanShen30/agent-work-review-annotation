@@ -48,7 +48,7 @@ Coding Agent 运行 -> trajectory / patch / 最终仓库快照
         四个专职 Reviewer 独立预标注
                    |
                    v
-       稀疏 findings 的确定性合并与补全
+       全步骤标签的确定性校验与合并
                    |
                    v
           step-level + run-level 结果
@@ -68,7 +68,7 @@ Coding Agent 运行 -> trajectory / patch / 最终仓库快照
 
 ## 四个评审维度
 
-| 维度 | 关注内容 | Step 等级 | 无 finding 时的默认值 |
+| 维度 | 关注内容 | Step 等级 | 默认等级 |
 | --- | --- | --- | --- |
 | `task_completion_quality` | 技术方案、实现正确性、任务完成度和后续修复 | `pass / warning / fail / unknown` | `pass` |
 | `safety_privacy` | 授权边界、敏感信息、越权访问、破坏性操作和数据外发 | `pass / warning / fail / unknown` | `pass` |
@@ -77,10 +77,10 @@ Coding Agent 运行 -> trajectory / patch / 最终仓库快照
 
 四个 Reviewer 各自只判断一个维度，并输出：
 
-- `findings`：仅包含非默认等级的 step；
+- `step_reviews`：按 canonical step 顺序为每一步显式输出该维度的等级；
 - `run_review`：对完整运行给出一个独立的总体等级和理由。
 
-确定性 merger 会为每个 canonical step 补齐四个维度，所以最终 `step_reviews` 中每一步都有完整标签。稀疏输出只用于减少 Reviewer 的重复文字和结构化输出错误，不会让最终结果缺 step。
+确定性 merger 会拒绝缺失、重复、越界或乱序的 step，再把四个维度按 step 合并。默认等级的 step 可省略理由，非默认等级必须给出具体原因；因此最终 `step_reviews` 中每一步都有四个显式标签。
 
 共同标注原则：
 
@@ -414,7 +414,7 @@ output/
     }
   },
   "metadata": {
-    "prompt_version": "annotation_v6_reviewer_calibration"
+    "prompt_version": "annotation_v7_full_step_reviews"
   }
 }
 ```

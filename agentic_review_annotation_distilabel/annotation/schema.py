@@ -122,50 +122,40 @@ class RunReviews(BaseModel):
     execution_efficiency: EfficiencyRunReview
 
 
-class CorrectnessStepFinding(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class CorrectnessStepReview(TaskCompletionQualityReview):
     step_id: int
-    rating: Literal["warning", "fail", "unknown"]
-    reason: str = Field(min_length=1)
-    recovery: Literal[True] | None = None
 
-    @field_validator("reason", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def normalize_reason(cls, value: Any) -> Any:
-        return _normalize_required_reason(value)
+    def reject_false_recovery(cls, value: Any) -> Any:
+        if isinstance(value, dict) and value.get("recovery") is False:
+            raise ValueError("recovery must be true when present")
+        return value
 
     @model_validator(mode="after")
-    def validate_recovery(self) -> CorrectnessStepFinding:
+    def validate_step_review(self) -> CorrectnessStepReview:
+        _require_reason_for_non_default(self.rating, "pass", self.reason)
         if self.recovery is True and self.rating not in {"warning", "fail"}:
-            raise ValueError("recovery can only appear on warning or fail findings")
+            raise ValueError("recovery can only appear on warning or fail step reviews")
         return self
 
 
-class QualityStepFinding(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class QualityStepReview(DimensionReview):
     step_id: int
-    rating: Literal["warning", "fail", "unknown"]
-    reason: str = Field(min_length=1)
 
-    @field_validator("reason", mode="before")
-    @classmethod
-    def normalize_reason(cls, value: Any) -> Any:
-        return _normalize_required_reason(value)
+    @model_validator(mode="after")
+    def validate_step_review(self) -> QualityStepReview:
+        _require_reason_for_non_default(self.rating, "pass", self.reason)
+        return self
 
 
-class EfficiencyStepFinding(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class EfficiencyStepReview(ExecutionEfficiencyReview):
     step_id: int
-    rating: Literal["normal", "low", "unknown"]
-    reason: str = Field(min_length=1)
 
-    @field_validator("reason", mode="before")
-    @classmethod
-    def normalize_reason(cls, value: Any) -> Any:
-        return _normalize_required_reason(value)
+    @model_validator(mode="after")
+    def validate_step_review(self) -> EfficiencyStepReview:
+        _require_reason_for_non_default(self.rating, "high", self.reason)
+        return self
 
 
 class CorrectnessAnnotationResult(BaseModel):
@@ -174,7 +164,7 @@ class CorrectnessAnnotationResult(BaseModel):
     instance_id: str = Field(min_length=1)
     review_complete: Literal[True]
     run_review: QualityRunReview
-    findings: list[CorrectnessStepFinding] = Field(default_factory=list)
+    step_reviews: list[CorrectnessStepReview]
 
 
 class SafetyPrivacyAnnotationResult(BaseModel):
@@ -183,7 +173,7 @@ class SafetyPrivacyAnnotationResult(BaseModel):
     instance_id: str = Field(min_length=1)
     review_complete: Literal[True]
     run_review: QualityRunReview
-    findings: list[QualityStepFinding] = Field(default_factory=list)
+    step_reviews: list[QualityStepReview]
 
 
 class ReportingIntegrityAnnotationResult(BaseModel):
@@ -192,7 +182,7 @@ class ReportingIntegrityAnnotationResult(BaseModel):
     instance_id: str = Field(min_length=1)
     review_complete: Literal[True]
     run_review: QualityRunReview
-    findings: list[QualityStepFinding] = Field(default_factory=list)
+    step_reviews: list[QualityStepReview]
 
 
 class ExecutionEfficiencyAnnotationResult(BaseModel):
@@ -201,7 +191,7 @@ class ExecutionEfficiencyAnnotationResult(BaseModel):
     instance_id: str = Field(min_length=1)
     review_complete: Literal[True]
     run_review: EfficiencyRunReview
-    findings: list[EfficiencyStepFinding] = Field(default_factory=list)
+    step_reviews: list[EfficiencyStepReview]
 
 
 class AnnotationResult(BaseModel):
@@ -369,10 +359,13 @@ def _normalize_optional_reason(value: str | None) -> str | None:
     return " ".join(value.split())
 
 
-def _normalize_required_reason(value: Any) -> str:
-    if not isinstance(value, str) or not " ".join(value.split()):
-        raise ValueError("findings must include a non-empty reason")
-    return " ".join(value.split())
+def _require_reason_for_non_default(
+    rating: str,
+    default_rating: str,
+    reason: str | None,
+) -> None:
+    if rating != default_rating and reason is None:
+        raise ValueError("non-default step reviews must include a non-empty reason")
 
 
 def _extract_json_object(text: str) -> Any:

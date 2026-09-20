@@ -5,6 +5,7 @@ import pytest
 
 from agentic_review_annotation_distilabel.annotation.annotators import ANNOTATION_AGENTS
 from agentic_review_annotation_distilabel.annotation.merge import (
+    _validate_step_reviews,
     merge_specialized_annotations,
 )
 from agentic_review_annotation_distilabel.annotation.prompt_builder import (
@@ -27,7 +28,7 @@ from agentic_review_annotation_distilabel.pipelines.distilabel_pipeline import (
 from agentic_review_annotation_distilabel.steps.base import CanonicalStep
 
 
-def test_merges_sparse_specialized_results_into_dense_step_and_run_reviews():
+def test_merges_full_specialized_results_into_step_and_run_reviews():
     merged = merge_specialized_annotations(
         instance_id="sample",
         valid_step_ids=[1, 2],
@@ -39,7 +40,8 @@ def test_merges_sparse_specialized_results_into_dense_step_and_run_reviews():
                     "rating": "warning",
                     "reason": "A correctness problem was later recovered.",
                 },
-                "findings": [
+                "step_reviews": [
+                    {"step_id": 1, "rating": "pass"},
                     {
                         "step_id": 2,
                         "rating": "fail",
@@ -54,7 +56,10 @@ def test_merges_sparse_specialized_results_into_dense_step_and_run_reviews():
                 "instance_id": "sample",
                 "review_complete": True,
                 "run_review": {"rating": "pass", "reason": "No safety issue."},
-                "findings": [],
+                "step_reviews": [
+                    {"step_id": 1, "rating": "pass"},
+                    {"step_id": 2, "rating": "pass"},
+                ],
             }
         ),
         reporting_integrity=ReportingIntegrityAnnotationResult.model_validate(
@@ -65,7 +70,8 @@ def test_merges_sparse_specialized_results_into_dense_step_and_run_reviews():
                     "rating": "warning",
                     "reason": "The final report contained an unsupported test claim.",
                 },
-                "findings": [
+                "step_reviews": [
+                    {"step_id": 1, "rating": "pass"},
                     {
                         "step_id": 2,
                         "rating": "warning",
@@ -82,7 +88,8 @@ def test_merges_sparse_specialized_results_into_dense_step_and_run_reviews():
                     "rating": "low",
                     "reason": "The run repeated ineffective work.",
                 },
-                "findings": [
+                "step_reviews": [
+                    {"step_id": 1, "rating": "high"},
                     {
                         "step_id": 2,
                         "rating": "low",
@@ -116,25 +123,23 @@ def test_merges_sparse_specialized_results_into_dense_step_and_run_reviews():
 
 
 def test_rejects_invalid_specialized_outputs_before_merge():
-    with pytest.raises(
-        ValueError, match="Input should be 'warning', 'fail' or 'unknown'"
-    ):
+    with pytest.raises(ValueError, match="non-default step reviews must include"):
         CorrectnessAnnotationResult.model_validate(
             {
                 "instance_id": "sample",
                 "review_complete": True,
                 "run_review": {"rating": "pass", "reason": "No issue."},
-                "findings": [{"step_id": 1, "rating": "pass", "reason": "Looks fine."}],
+                "step_reviews": [{"step_id": 1, "rating": "warning"}],
             }
         )
 
-    with pytest.raises(ValueError, match="Input should be True"):
+    with pytest.raises(ValueError, match="recovery must be true when present"):
         CorrectnessAnnotationResult.model_validate(
             {
                 "instance_id": "sample",
                 "review_complete": True,
                 "run_review": {"rating": "fail", "reason": "Wrong API."},
-                "findings": [
+                "step_reviews": [
                     {
                         "step_id": 1,
                         "rating": "fail",
@@ -145,13 +150,13 @@ def test_rejects_invalid_specialized_outputs_before_merge():
             }
         )
 
-    with pytest.raises(ValueError, match="findings must include a non-empty reason"):
+    with pytest.raises(ValueError, match="non-default step reviews must include"):
         SafetyPrivacyAnnotationResult.model_validate(
             {
                 "instance_id": "sample",
                 "review_complete": True,
                 "run_review": {"rating": "warning", "reason": "Risk found."},
-                "findings": [{"step_id": 1, "rating": "warning", "reason": ""}],
+                "step_reviews": [{"step_id": 1, "rating": "warning", "reason": ""}],
             }
         )
 
@@ -164,7 +169,8 @@ def test_rejects_invalid_specialized_outputs_before_merge():
                     "instance_id": "sample",
                     "review_complete": True,
                     "run_review": {"rating": "fail", "reason": "Wrong step."},
-                    "findings": [
+                    "step_reviews": [
+                        {"step_id": 1, "rating": "pass"},
                         {"step_id": 3, "rating": "fail", "reason": "Wrong API."}
                     ],
                 }
@@ -174,7 +180,10 @@ def test_rejects_invalid_specialized_outputs_before_merge():
                     "instance_id": "sample",
                     "review_complete": True,
                     "run_review": {"rating": "pass", "reason": "No issue."},
-                    "findings": [],
+                    "step_reviews": [
+                        {"step_id": 1, "rating": "pass"},
+                        {"step_id": 2, "rating": "pass"},
+                    ],
                 }
             ),
             reporting_integrity=ReportingIntegrityAnnotationResult.model_validate(
@@ -182,7 +191,10 @@ def test_rejects_invalid_specialized_outputs_before_merge():
                     "instance_id": "sample",
                     "review_complete": True,
                     "run_review": {"rating": "pass", "reason": "No issue."},
-                    "findings": [],
+                    "step_reviews": [
+                        {"step_id": 1, "rating": "pass"},
+                        {"step_id": 2, "rating": "pass"},
+                    ],
                 }
             ),
             execution_efficiency=ExecutionEfficiencyAnnotationResult.model_validate(
@@ -193,13 +205,28 @@ def test_rejects_invalid_specialized_outputs_before_merge():
                         "rating": "high",
                         "reason": "No efficiency issue.",
                     },
-                    "findings": [],
+                    "step_reviews": [
+                        {"step_id": 1, "rating": "high"},
+                        {"step_id": 2, "rating": "high"},
+                    ],
                 }
             ),
         )
 
 
-def test_prompt_builder_creates_four_dedicated_instructions():
+@pytest.mark.parametrize(
+    ("step_ids", "message"),
+    [
+        ([1], "missing step ids: 2"),
+        ([1, 1], "duplicate step ids: 1"),
+        ([2, 1], "not in canonical order"),
+    ],
+)
+def test_rejects_incomplete_duplicate_or_out_of_order_step_reviews(step_ids, message):
+    with pytest.raises(ValueError, match=message):
+        _validate_step_reviews("test_dimension", step_ids, [1, 2])
+
+
     sample = SimpleNamespace(
         instance_id="sample",
         repository={"repo": "example/repo"},
@@ -228,16 +255,16 @@ def test_prompt_builder_creates_four_dedicated_instructions():
     assert evaluation_marker in instructions["reporting_evaluation_integrity"]
     assert evaluation_marker not in instructions["safety_privacy"]
     assert evaluation_marker not in instructions["execution_efficiency"]
-    assert "sparse `findings`" in instructions["task_completion_quality"]
+    assert "exactly one item in `step_reviews`" in instructions["task_completion_quality"]
     assert "`run_review`" in instructions["task_completion_quality"]
-    assert PROMPT_VERSION == "annotation_v6_reviewer_calibration"
+    assert PROMPT_VERSION == "annotation_v7_full_step_reviews"
 
     for instruction in instructions.values():
         assert "Evidence priority:" in instruction
         assert "earliest attributable step" in instruction
         assert "Use `unknown` only" in instruction
         assert "Run-level aggregation:" in instruction
-        assert "emit at most one finding per step" in instruction
+        assert "use every `step_id` exactly once" in instruction
 
     assert (
         "bad final patch without a traceable causal step"
@@ -298,7 +325,12 @@ def test_invalid_annotator_generation_is_written_to_failed_dir(tmp_path):
                     else "pass",
                     "reason": "No issue found.",
                 },
-                "findings": [],
+                "step_reviews": [
+                    {
+                        "step_id": 1,
+                        "rating": "high" if agent.name == "execution_efficiency" else "pass",
+                    }
+                ],
             }
         )
         for agent in ANNOTATION_AGENTS
@@ -308,7 +340,7 @@ def test_invalid_annotator_generation_is_written_to_failed_dir(tmp_path):
             "instance_id": "sample",
             "review_complete": False,
             "run_review": {"rating": "pass", "reason": "No issue found."},
-            "findings": [],
+            "step_reviews": [{"step_id": 1, "rating": "pass"}],
         }
     )
 
