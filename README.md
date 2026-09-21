@@ -360,6 +360,8 @@ Coding Agent 容器不需要持续运行，四个 Reviewer 也不会共享可变
 
 四个 Reviewer 都会看到任务、generated patch、完整 canonical steps 和本维度相关事实；Docker runtime 下还可以在各自的临时容器中探索最终仓库。
 
+Reviewer 使用独立的模型输入投影：完整 canonical steps 仍保存在 master record 中供审计，但模型输入会移除组合式 `messages` 副本、合并同一 tool call 的多种 action 表示，并用顶层 `task` 引用替代初始上下文里重复的任务正文。该投影只删除结构性重复，不采用截断；`compact_for_model` 仍是额外的调试用截断选项。
+
 ## 输出与数据格式
 
 ```text
@@ -414,7 +416,7 @@ output/
     }
   },
   "metadata": {
-    "prompt_version": "annotation_v7_full_step_reviews"
+    "prompt_version": "annotation_v8_deduplicated_model_input"
   }
 }
 ```
