@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,7 @@ from agentic_review_annotation_distilabel.evidence import (
 )
 from agentic_review_annotation_distilabel.steps.base import CanonicalStep
 
-PROMPT_VERSION = "annotation_v7_full_step_reviews"
+PROMPT_VERSION = "annotation_v8_deduplicated_model_input"
 DEFAULT_PROMPT_PATH = (
     Path(__file__).resolve().parents[1] / "prompts" / "annotation_v1.md"
 )
@@ -103,17 +104,27 @@ class PromptBuilder:
     def build_model_payload(
         self, sample: Sample, steps: list[CanonicalStep]
     ) -> dict[str, Any]:
-        if not self.compact_for_model:
-            return self.build_payload(sample, steps)
-
         deterministic_facts = extract_deterministic_facts(
             steps, generated_patch=sample.patch
         )
+        model_steps = [model_step_payload(step, task=sample.task) for step in steps]
+
+        if not self.compact_for_model:
+            return {
+                "instance_id": sample.instance_id,
+                "repository": sample.repository,
+                "environment": sample.environment,
+                "task": sample.task,
+                "evaluation": sample.evaluation,
+                "generated_patch": sample.patch,
+                "canonical_steps": model_steps,
+                "deterministic_facts": deterministic_facts,
+            }
 
         compact_steps = []
         used_step_chars = 0
-        for step in steps:
-            compact_content = compact_step_content(step.content)
+        for step in model_steps:
+            compact_content = compact_step_content(step["content"])
             step_text = json.dumps(compact_content, ensure_ascii=False)
             if len(step_text) > self.max_step_chars:
                 compact_content = {
@@ -130,7 +141,7 @@ class PromptBuilder:
                 }
                 step_text = json.dumps(compact_content, ensure_ascii=False)
 
-            compact_step = step.to_dict()
+            compact_step = dict(step)
             compact_step["content"] = compact_content
             compact_steps.append(compact_step)
             used_step_chars += len(step_text)
@@ -149,6 +160,195 @@ class PromptBuilder:
                 "and full canonical steps are saved in output/*/normalized for human audit."
             ),
         }
+
+
+def model_step_payload(step: CanonicalStep, *, task: Any) -> dict[str, Any]:
+    """Project an audit step into a non-redundant model-facing step."""
+    return {
+        "step_id": step.step_id,
+        "content": model_step_content(step.content, task=task),
+    }
+
+
+def model_step_content(content: Any, *, task: Any) -> Any:
+    if not isinstance(content, Mapping) or content.get("type") != "agent_turn":
+        return content
+
+    projected = {
+        key: value
+        for key, value in content.items()
+        if key
+        not in {
+            "agent_message",
+            "actions",
+            "observations",
+            "messages",
+            "context_messages",
+        }
+    }
+    projected["type"] = "agent_turn"
+
+    agent_message = model_agent_message(content.get("agent_message"))
+    if agent_message:
+        projected["agent_message"] = agent_message
+
+    actions = model_actions(content.get("actions"))
+    if actions:
+        projected["actions"] = actions
+
+    observations = content.get("observations")
+    if observations:
+        projected["observations"] = observations
+
+    context_messages = model_context_messages(
+        content.get("context_messages"), task=task
+    )
+    if context_messages:
+        projected["context_messages"] = context_messages
+
+    return projected
+
+
+def model_agent_message(message: Any) -> Any:
+    if not isinstance(message, Mapping):
+        return message
+
+    projected = {
+        key: value
+        for key, value in message.items()
+        if key not in {"tool_calls", "extra"}
+    }
+    extra = message.get("extra")
+    if isinstance(extra, Mapping):
+        projected_extra = {
+            key: value for key, value in extra.items() if key != "actions"
+        }
+        if projected_extra:
+            projected["extra"] = projected_extra
+    return projected
+
+
+def model_actions(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+
+    actions: list[dict[str, Any]] = []
+    positions: dict[str, int] = {}
+    anonymous: set[str] = set()
+    for raw_action in value:
+        if not isinstance(raw_action, Mapping):
+            continue
+        action = model_action(raw_action)
+        action_id = action.get("action_id")
+        if isinstance(action_id, str) and action_id:
+            if action_id in positions:
+                actions[positions[action_id]] = merge_model_actions(
+                    actions[positions[action_id]], action
+                )
+            else:
+                positions[action_id] = len(actions)
+                actions.append(action)
+            continue
+
+        identity = json.dumps(action, ensure_ascii=False, sort_keys=True)
+        if identity not in anonymous:
+            anonymous.add(identity)
+            actions.append(action)
+    return actions
+
+
+def model_action(action: Mapping[str, Any]) -> dict[str, Any]:
+    function = action.get("function")
+    function = dict(function) if isinstance(function, Mapping) else {}
+    action_id = action.get("id") or action.get("tool_call_id") or action.get("call_id")
+    tool = action.get("name") or action.get("tool") or function.get("name")
+    arguments = function.get("arguments", action.get("arguments"))
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except json.JSONDecodeError:
+            pass
+
+    command = action.get("command") or action.get("cmd")
+    if command is not None:
+        if isinstance(arguments, Mapping):
+            arguments = dict(arguments)
+            arguments.setdefault("command", command)
+        elif arguments is None:
+            arguments = {"command": command}
+
+    ignored = {
+        "id",
+        "tool_call_id",
+        "call_id",
+        "name",
+        "tool",
+        "function",
+        "arguments",
+        "command",
+        "cmd",
+        "index",
+        "type",
+    }
+    details = {key: value for key, value in action.items() if key not in ignored}
+
+    projected: dict[str, Any] = {}
+    if action_id is not None:
+        projected["action_id"] = str(action_id)
+    if tool is not None:
+        projected["tool"] = str(tool)
+    if arguments is not None:
+        projected["arguments"] = arguments
+    if details:
+        projected["details"] = details
+    return projected
+
+
+def merge_model_actions(
+    existing: dict[str, Any], incoming: dict[str, Any]
+) -> dict[str, Any]:
+    merged = dict(existing)
+    for key, value in incoming.items():
+        current = merged.get(key)
+        if current is None:
+            merged[key] = value
+        elif (
+            key in {"arguments", "details"}
+            and isinstance(current, Mapping)
+            and isinstance(value, Mapping)
+        ):
+            combined = dict(current)
+            for nested_key, nested_value in value.items():
+                combined.setdefault(nested_key, nested_value)
+            merged[key] = combined
+    return merged
+
+
+def model_context_messages(value: Any, *, task: Any) -> list[Any]:
+    if not isinstance(value, list):
+        return []
+
+    task_text = task if isinstance(task, str) and task else None
+    projected = []
+    for message in value:
+        if not isinstance(message, Mapping):
+            projected.append(message)
+            continue
+        item = dict(message)
+        content = item.get("content")
+        if (
+            task_text
+            and item.get("role") == "user"
+            and isinstance(content, str)
+            and task_text in content
+        ):
+            item["content"] = content.replace(
+                task_text,
+                "[Task text omitted here; see top-level `task`.]",
+                1,
+            )
+        projected.append(item)
+    return projected
 
 
 def compact_step_content(content: Any) -> Any:

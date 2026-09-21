@@ -257,7 +257,7 @@ def test_rejects_incomplete_duplicate_or_out_of_order_step_reviews(step_ids, mes
     assert evaluation_marker not in instructions["execution_efficiency"]
     assert "exactly one item in `step_reviews`" in instructions["task_completion_quality"]
     assert "`run_review`" in instructions["task_completion_quality"]
-    assert PROMPT_VERSION == "annotation_v7_full_step_reviews"
+    assert PROMPT_VERSION == "annotation_v8_deduplicated_model_input"
 
     for instruction in instructions.values():
         assert "Evidence priority:" in instruction
@@ -275,6 +275,105 @@ def test_rejects_incomplete_duplicate_or_out_of_order_step_reviews(step_ids, mes
         "post-run evaluation mismatch" in instructions["reporting_evaluation_integrity"]
     )
     assert "not by raw step count" in instructions["execution_efficiency"]
+
+
+def test_model_payload_deduplicates_agent_turns_without_changing_audit_payload():
+    task = "Fix the bug."
+    agent_message = {
+        "role": "assistant",
+        "content": "I will run the focused test.",
+        "reasoning_content": "The failure should reproduce locally.",
+        "tool_calls": [
+            {
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                    "name": "bash",
+                    "arguments": '{"command":"pytest tests/test_fix.py"}',
+                },
+            }
+        ],
+        "extra": {
+            "actions": [
+                {
+                    "command": "pytest tests/test_fix.py",
+                    "tool_call_id": "call-1",
+                }
+            ],
+            "cost": 0.1,
+        },
+    }
+    observations = [
+        {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "content": '{"returncode":1,"output":"1 failed"}',
+        }
+    ]
+    actions = [
+        agent_message["extra"]["actions"][0],
+        agent_message["tool_calls"][0],
+    ]
+    step = CanonicalStep(
+        step_id=1,
+        raw_message_indices=[2, 3],
+        action_ids=["call-1", "call-1"],
+        observation_indices=[3],
+        content={
+            "type": "agent_turn",
+            "agent_message": agent_message,
+            "actions": actions,
+            "observations": observations,
+            "messages": [agent_message, *observations],
+            "context_messages": [
+                {"role": "system", "content": "Stay inside the repository."},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Please solve this issue:\n{task}\nDo not use network."
+                    ),
+                },
+            ],
+        },
+    )
+    sample = SimpleNamespace(
+        instance_id="sample",
+        repository={"repo": "example/repo"},
+        environment={"image": "example:latest"},
+        task=task,
+        evaluation={"resolved": False},
+        patch="diff --git a/a.py b/a.py",
+    )
+    builder = PromptBuilder()
+
+    audit_payload = builder.build_payload(sample, [step])
+    model_payload = builder.build_model_payload(sample, [step])
+
+    audit_step = audit_payload["canonical_steps"][0]
+    assert audit_step["content"]["messages"] == [agent_message, *observations]
+    assert audit_step["raw_message_indices"] == [2, 3]
+
+    model_step = model_payload["canonical_steps"][0]
+    assert set(model_step) == {"step_id", "content"}
+    assert "messages" not in model_step["content"]
+    assert model_step["content"]["observations"] == observations
+    assert model_step["content"]["actions"] == [
+        {
+            "action_id": "call-1",
+            "tool": "bash",
+            "arguments": {"command": "pytest tests/test_fix.py"},
+        }
+    ]
+    assert model_step["content"]["agent_message"] == {
+        "role": "assistant",
+        "content": "I will run the focused test.",
+        "reasoning_content": "The failure should reproduce locally.",
+        "extra": {"cost": 0.1},
+    }
+    context = model_step["content"]["context_messages"]
+    assert task not in context[1]["content"]
+    assert "see top-level `task`" in context[1]["content"]
+    assert "Do not use network." in context[1]["content"]
 
 
 def test_mock_pipeline_performs_four_independent_specialized_generations(tmp_path):
