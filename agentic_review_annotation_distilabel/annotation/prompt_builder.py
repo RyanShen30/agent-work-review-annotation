@@ -2,14 +2,10 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Any
 
 from agentic_review_annotation_distilabel.adapters.base import Sample
 from agentic_review_annotation_distilabel.annotation.annotators import ANNOTATION_AGENTS
-from agentic_review_annotation_distilabel.annotation.schema import (
-    annotation_json_schema,
-)
 from agentic_review_annotation_distilabel.evidence import (
     extract_deterministic_facts,
     facts_for_dimension,
@@ -17,15 +13,10 @@ from agentic_review_annotation_distilabel.evidence import (
 from agentic_review_annotation_distilabel.steps.base import CanonicalStep
 
 PROMPT_VERSION = "annotation_v8_deduplicated_model_input"
-DEFAULT_PROMPT_PATH = (
-    Path(__file__).resolve().parents[1] / "prompts" / "annotation_v1.md"
-)
-
 
 class PromptBuilder:
     def __init__(
         self,
-        template_path: Path = DEFAULT_PROMPT_PATH,
         *,
         compact_for_model: bool = False,
         max_task_chars: int = 12000,
@@ -33,23 +24,11 @@ class PromptBuilder:
         max_step_chars: int = 6000,
         max_total_step_chars: int = 60000,
     ) -> None:
-        self.template_path = template_path
         self.compact_for_model = compact_for_model
         self.max_task_chars = max_task_chars
         self.max_patch_chars = max_patch_chars
         self.max_step_chars = max_step_chars
         self.max_total_step_chars = max_total_step_chars
-
-    def build_instruction(self, sample: Sample, steps: list[CanonicalStep]) -> str:
-        template = self.template_path.read_text(encoding="utf-8")
-        payload = self.build_model_payload(sample, steps)
-        return template.replace(
-            "{{payload_json}}",
-            json.dumps(payload, ensure_ascii=False, indent=2),
-        ).replace(
-            "{{json_schema}}",
-            json.dumps(annotation_json_schema(), ensure_ascii=False, indent=2),
-        )
 
     def build_annotator_instructions(
         self,
