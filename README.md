@@ -78,9 +78,9 @@ Coding Agent 运行 -> trajectory / patch / 最终仓库快照
 四个 Reviewer 各自只判断一个维度，并输出：
 
 - `step_reviews`：按 canonical step 顺序为每一步显式输出该维度的等级；
-- `run_review`：对完整运行给出一个独立的总体等级和理由。
+- `run_review`：对完整运行给出一个独立的总体等级；仅非默认等级给出理由。
 
-确定性 merger 会拒绝缺失、重复、越界或乱序的 step，再把四个维度按 step 合并。默认等级的 step 可省略理由，非默认等级必须给出具体原因；因此最终 `step_reviews` 中每一步都有四个显式标签。
+确定性 merger 会拒绝原始结果中缺失、重复、越界或乱序的 step，再按四个维度分别收集非默认等级的 `findings`。最终结果不再逐步列出默认 `pass`/`high`。step 和 run-level 的默认等级都不得携带 `reason`；有问题必须标非默认等级并给出具体原因。
 
 共同标注原则：
 
@@ -262,7 +262,7 @@ REVIEW_MODEL=你的_Reviewer_模型
 3. `output/pipeline/evaluation/` 下保留官方 predictions、report 和测试日志；
 4. 日志出现 `done: queued=1 saved=1`；
 5. `output/pipeline/annotation/` 产生合并后的自动预标注；
-6. `output/pipeline/normalized/` 中同一实例的 `annotation.auto` 同时包含 `step_reviews` 和 `run_reviews`。
+6. `output/pipeline/normalized/` 中同一实例的 `annotation.auto` 按四个维度保存 `findings` 和 `run_review`。
 
 `resolved=false` 表示 Coding Agent 没有通过官方评测，但流水线本身仍可能运行成功；这类轨迹往往正是 Work Review 数据的重要来源。真正的流水线失败会以非零退出码结束，并保留具体异常或 `_failed/` 中的模型原始输出。
 
@@ -379,44 +379,36 @@ output/
     └── cache/                    # Reviewer 缓存
 ```
 
-合并后的自动标注核心结构：
+合并后的自动标注核心结构（没有问题的维度保留空 `findings` 和无理由的默认 run-level 等级）：
 
 ```json
 {
   "instance_id": "example_id",
-  "step_reviews": [
-    {
-      "step": 7,
-      "task_completion_quality": {
+  "task_completion_quality": {
+    "findings": [
+      {
+        "step_id": 7,
         "rating": "fail",
         "reason": "The step introduced a material implementation error.",
         "recovery": true
-      },
-      "safety_privacy": {"rating": "pass"},
-      "reporting_evaluation_integrity": {"rating": "pass"},
-      "execution_efficiency": {"rating": "high"}
-    }
-  ],
-  "run_reviews": {
-    "task_completion_quality": {
-      "rating": "pass",
-      "reason": "The earlier defect was repaired and the final evaluation passed."
-    },
-    "safety_privacy": {
-      "rating": "pass",
-      "reason": "No safety or privacy boundary issue was found."
-    },
-    "reporting_evaluation_integrity": {
-      "rating": "pass",
-      "reason": "The final report matches the available evidence."
-    },
-    "execution_efficiency": {
-      "rating": "high",
-      "reason": "No avoidable waste was found."
-    }
+      }
+    ],
+    "run_review": {"rating": "pass"}
+  },
+  "safety_privacy": {
+    "findings": [],
+    "run_review": {"rating": "pass"}
+  },
+  "reporting_evaluation_integrity": {
+    "findings": [],
+    "run_review": {"rating": "pass"}
+  },
+  "execution_efficiency": {
+    "findings": [],
+    "run_review": {"rating": "high"}
   },
   "metadata": {
-    "prompt_version": "annotation_v8_deduplicated_model_input"
+    "prompt_version": "annotation_v9_sparse_dimension_reviews"
   }
 }
 ```

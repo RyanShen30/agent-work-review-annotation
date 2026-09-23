@@ -252,7 +252,6 @@ def _mock_specialized_result(
         "review_complete": True,
         "run_review": {
             "rating": "high" if agent.name == "execution_efficiency" else "pass",
-            "reason": "The mock reviewer found no dimension-specific run-level issue.",
         },
         "step_reviews": [
             {

@@ -12,7 +12,7 @@ from agentic_review_annotation_distilabel.evidence import (
 )
 from agentic_review_annotation_distilabel.steps.base import CanonicalStep
 
-PROMPT_VERSION = "annotation_v8_deduplicated_model_input"
+PROMPT_VERSION = "annotation_v9_sparse_dimension_reviews"
 
 class PromptBuilder:
     def __init__(
