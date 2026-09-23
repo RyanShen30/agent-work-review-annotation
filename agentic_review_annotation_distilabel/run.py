@@ -45,7 +45,7 @@ from agentic_review_annotation_distilabel.steps import (
     OpenCollabStepParser,
 )
 
-DEFAULT_INPUT = Path("annotation/samples")
+DEFAULT_INPUT = Path("output/traj")
 DEFAULT_NORMALIZED_DIR = Path("output/annotation/normalized")
 DEFAULT_NORMALIZED_PREVIEW_DIR = Path("output/annotation/preview")
 DEFAULT_OUTPUT_DIR = Path("output/annotation/annotation")
@@ -315,7 +315,6 @@ def prepare_rows(
         rows.append(
             {
                 "instance_id": sample.instance_id,
-                "instruction": prompt_builder.build_instruction(sample, steps),
                 "annotator_instructions": prompt_builder.build_annotator_instructions(
                     sample,
                     steps,
