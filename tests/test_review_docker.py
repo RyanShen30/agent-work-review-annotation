@@ -59,7 +59,6 @@ def test_docker_review_rebuilds_patch_uses_tools_and_cleans_up(
                             "review_complete": True,
                             "run_review": {
                                 "rating": "high" if is_efficiency else "pass",
-                                "reason": "No issue found during the complete review.",
                             },
                             "step_reviews": [
                                 {
@@ -118,9 +117,10 @@ def test_docker_review_rebuilds_patch_uses_tools_and_cleans_up(
 
     result = run_annotation_pipeline([row], config)[0]
 
-    assert json.loads(result["generation"])["step_reviews"][0][
-        "task_completion_quality"
-    ] == {"rating": "pass"}
+    assert json.loads(result["generation"])["task_completion_quality"] == {
+        "findings": [],
+        "run_review": {"rating": "pass"},
+    }
     assert sum(args[:2] == ["docker", "run"] for args, _ in calls) == 4
     assert all(
         args[args.index("--platform") + 1] == "linux/amd64"

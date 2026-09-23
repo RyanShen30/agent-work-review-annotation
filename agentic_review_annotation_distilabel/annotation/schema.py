@@ -89,28 +89,34 @@ class QualityRunReview(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     rating: QualityRating
-    reason: str = Field(min_length=1)
+    reason: str | None = Field(default=None, min_length=1)
 
     @field_validator("reason", mode="before")
     @classmethod
     def normalize_reason(cls, value: Any) -> Any:
-        if not isinstance(value, str) or not " ".join(value.split()):
-            raise ValueError("run-level reviews must include a non-empty reason")
-        return " ".join(value.split())
+        return _normalize_optional_reason(value)
+
+    @model_validator(mode="after")
+    def validate_reason(self) -> QualityRunReview:
+        _require_reason_matching_rating(self.rating, "pass", self.reason, "run")
+        return self
 
 
 class EfficiencyRunReview(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     rating: EfficiencyRating
-    reason: str = Field(min_length=1)
+    reason: str | None = Field(default=None, min_length=1)
 
     @field_validator("reason", mode="before")
     @classmethod
     def normalize_reason(cls, value: Any) -> Any:
-        if not isinstance(value, str) or not " ".join(value.split()):
-            raise ValueError("run-level reviews must include a non-empty reason")
-        return " ".join(value.split())
+        return _normalize_optional_reason(value)
+
+    @model_validator(mode="after")
+    def validate_reason(self) -> EfficiencyRunReview:
+        _require_reason_matching_rating(self.rating, "high", self.reason, "run")
+        return self
 
 
 class RunReviews(BaseModel):
@@ -134,7 +140,7 @@ class CorrectnessStepReview(TaskCompletionQualityReview):
 
     @model_validator(mode="after")
     def validate_step_review(self) -> CorrectnessStepReview:
-        _require_reason_for_non_default(self.rating, "pass", self.reason)
+        _require_reason_matching_rating(self.rating, "pass", self.reason, "step")
         if self.recovery is True and self.rating not in {"warning", "fail"}:
             raise ValueError("recovery can only appear on warning or fail step reviews")
         return self
@@ -145,7 +151,7 @@ class QualityStepReview(DimensionReview):
 
     @model_validator(mode="after")
     def validate_step_review(self) -> QualityStepReview:
-        _require_reason_for_non_default(self.rating, "pass", self.reason)
+        _require_reason_matching_rating(self.rating, "pass", self.reason, "step")
         return self
 
 
@@ -154,7 +160,7 @@ class EfficiencyStepReview(ExecutionEfficiencyReview):
 
     @model_validator(mode="after")
     def validate_step_review(self) -> EfficiencyStepReview:
-        _require_reason_for_non_default(self.rating, "high", self.reason)
+        _require_reason_matching_rating(self.rating, "high", self.reason, "step")
         return self
 
 
@@ -194,12 +200,55 @@ class ExecutionEfficiencyAnnotationResult(BaseModel):
     step_reviews: list[EfficiencyStepReview]
 
 
-class AnnotationResult(BaseModel):
+class CorrectnessDimensionAnnotation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    findings: list[CorrectnessStepReview] = Field(default_factory=list)
+    run_review: QualityRunReview
+
+    @model_validator(mode="after")
+    def only_problems(self) -> CorrectnessDimensionAnnotation:
+        _require_non_default_findings(self.findings, "pass")
+        return self
+
+
+class QualityDimensionAnnotation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    findings: list[QualityStepReview] = Field(default_factory=list)
+    run_review: QualityRunReview
+
+    @model_validator(mode="after")
+    def only_problems(self) -> QualityDimensionAnnotation:
+        _require_non_default_findings(self.findings, "pass")
+        return self
+
+
+class EfficiencyDimensionAnnotation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    findings: list[EfficiencyStepReview] = Field(default_factory=list)
+    run_review: EfficiencyRunReview
+
+    @model_validator(mode="after")
+    def only_problems(self) -> EfficiencyDimensionAnnotation:
+        _require_non_default_findings(self.findings, "high")
+        return self
+
+
+class DimensionAnnotations(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_completion_quality: CorrectnessDimensionAnnotation
+    safety_privacy: QualityDimensionAnnotation
+    reporting_evaluation_integrity: QualityDimensionAnnotation
+    execution_efficiency: EfficiencyDimensionAnnotation
+
+
+class AnnotationResult(DimensionAnnotations):
     model_config = ConfigDict(extra="forbid")
 
     instance_id: str = Field(min_length=1)
-    step_reviews: list[StepReview] = Field(default_factory=list)
-    run_reviews: RunReviews | None = None
 
 
 class SourceRecord(BaseModel):
@@ -266,19 +315,17 @@ class OracleRecord(BaseModel):
     log_parser: Any | None = None
 
 
-class AutoAnnotationRecord(BaseModel):
+class AutoAnnotationRecord(DimensionAnnotations):
     model_config = ConfigDict(extra="forbid")
 
     model: str | None = None
     prompt_version: str | None = None
-    step_reviews: list[StepReview] = Field(default_factory=list)
-    run_reviews: RunReviews | None = None
 
 
 class AnnotationRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    auto: AutoAnnotationRecord = Field(default_factory=AutoAnnotationRecord)
+    auto: AutoAnnotationRecord | None = None
     final: AnnotationResult | None = None
 
 
@@ -353,19 +400,27 @@ def _blank_string_to_none(value: Any) -> Any:
     return value
 
 
-def _normalize_optional_reason(value: str | None) -> str | None:
-    if value is None:
-        return None
-    return " ".join(value.split())
+def _normalize_optional_reason(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    return " ".join(value.split()) or None
 
 
-def _require_reason_for_non_default(
+def _require_reason_matching_rating(
     rating: str,
     default_rating: str,
     reason: str | None,
+    level: str,
 ) -> None:
     if rating != default_rating and reason is None:
-        raise ValueError("non-default step reviews must include a non-empty reason")
+        raise ValueError(f"non-default {level} reviews must include a non-empty reason")
+    if rating == default_rating and reason is not None:
+        raise ValueError(f"default {level} reviews must not include a reason")
+
+
+def _require_non_default_findings(findings: list[Any], default_rating: str) -> None:
+    if any(finding.rating == default_rating for finding in findings):
+        raise ValueError(f"findings must omit default {default_rating} step reviews")
 
 
 def _extract_json_object(text: str) -> Any:
@@ -481,29 +536,20 @@ def validate_annotation_against_steps(
         )
 
     expected = set(valid_step_ids)
-    seen: list[int] = [review.step for review in annotation.step_reviews]
-    seen_set = set(seen)
-    step_counts = Counter(seen)
-
-    duplicate_steps = sorted(
-        step_id for step_id, count in step_counts.items() if count > 1
-    )
-    if duplicate_steps:
-        raise ValueError(
-            "Annotation contains duplicate step reviews: "
-            + ", ".join(str(step_id) for step_id in duplicate_steps)
-        )
-
-    invalid_steps = sorted(seen_set - expected)
-    if invalid_steps:
-        raise ValueError(
-            "Annotation contains reviewed steps not present in trajectory: "
-            + ", ".join(str(step_id) for step_id in invalid_steps)
-        )
-
-    missing_steps = sorted(expected - seen_set)
-    if missing_steps:
-        raise ValueError(
-            "Annotation is missing step reviews for trajectory steps: "
-            + ", ".join(str(step_id) for step_id in missing_steps)
-        )
+    for name in (
+        "task_completion_quality",
+        "safety_privacy",
+        "reporting_evaluation_integrity",
+        "execution_efficiency",
+    ):
+        seen = [finding.step_id for finding in getattr(annotation, name).findings]
+        duplicates = sorted(step_id for step_id, count in Counter(seen).items() if count > 1)
+        if duplicates:
+            raise ValueError(f"{name} contains duplicate findings: {duplicates}")
+        invalid = sorted(set(seen) - expected)
+        if invalid:
+            raise ValueError(f"{name} references steps not present in trajectory: {invalid}")
+        seen_set = set(seen)
+        canonical_order = [step_id for step_id in valid_step_ids if step_id in seen_set]
+        if seen != canonical_order:
+            raise ValueError(f"{name} findings are not in canonical order")

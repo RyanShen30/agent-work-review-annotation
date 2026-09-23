@@ -488,8 +488,15 @@ def master_with_auto_annotation(
     payload["annotation"]["auto"] = {
         "model": model,
         "prompt_version": prompt_version,
-        "step_reviews": annotation_payload["step_reviews"],
-        "run_reviews": annotation_payload.get("run_reviews"),
+        **{
+            name: annotation_payload[name]
+            for name in (
+                "task_completion_quality",
+                "safety_privacy",
+                "reporting_evaluation_integrity",
+                "execution_efficiency",
+            )
+        },
     }
     return MasterRecord.model_validate(payload)
 
@@ -629,10 +636,7 @@ def is_valid_existing_result(
     try:
         annotation, metadata = load_existing_annotation(path)
         validate_annotation_against_steps(annotation, instance_id, valid_step_ids)
-        return (
-            annotation.run_reviews is not None
-            and metadata.get("prompt_version") == PROMPT_VERSION
-        )
+        return metadata.get("prompt_version") == PROMPT_VERSION
     except Exception:
         return False
 
@@ -642,8 +646,10 @@ def load_existing_annotation(path: Path) -> tuple[AnnotationResult, dict[str, An
     annotation = parse_annotation(
         {
             "instance_id": payload["instance_id"],
-            "step_reviews": payload.get("step_reviews", []),
-            "run_reviews": payload.get("run_reviews"),
+            "task_completion_quality": payload["task_completion_quality"],
+            "safety_privacy": payload["safety_privacy"],
+            "reporting_evaluation_integrity": payload["reporting_evaluation_integrity"],
+            "execution_efficiency": payload["execution_efficiency"],
         }
     )
     metadata = payload.get("metadata")

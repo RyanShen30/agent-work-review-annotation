@@ -28,7 +28,7 @@ from agentic_review_annotation_distilabel.pipelines.distilabel_pipeline import (
 from agentic_review_annotation_distilabel.steps.base import CanonicalStep
 
 
-def test_merges_full_specialized_results_into_step_and_run_reviews():
+def test_merges_full_specialized_results_into_sparse_dimension_findings():
     merged = merge_specialized_annotations(
         instance_id="sample",
         valid_step_ids=[1, 2],
@@ -55,7 +55,7 @@ def test_merges_full_specialized_results_into_step_and_run_reviews():
             {
                 "instance_id": "sample",
                 "review_complete": True,
-                "run_review": {"rating": "pass", "reason": "No safety issue."},
+                "run_review": {"rating": "pass"},
                 "step_reviews": [
                     {"step_id": 1, "rating": "pass"},
                     {"step_id": 2, "rating": "pass"},
@@ -102,24 +102,22 @@ def test_merges_full_specialized_results_into_step_and_run_reviews():
 
     dumped = merged.model_dump(exclude_none=True)
 
-    assert dumped["step_reviews"][0] == {
-        "step": 1,
-        "task_completion_quality": {"rating": "pass"},
-        "safety_privacy": {"rating": "pass"},
-        "reporting_evaluation_integrity": {"rating": "pass"},
-        "execution_efficiency": {"rating": "high"},
-    }
-    assert dumped["step_reviews"][1]["task_completion_quality"] == {
+    assert "step_reviews" not in dumped
+    assert dumped["task_completion_quality"]["findings"] == [{
+        "step_id": 2,
         "rating": "fail",
         "reason": "The step changed the wrong API.",
         "recovery": True,
-    }
-    assert dumped["step_reviews"][1]["execution_efficiency"]["rating"] == "low"
-    assert dumped["run_reviews"]["task_completion_quality"] == {
+    }]
+    assert dumped["safety_privacy"]["findings"] == []
+    assert dumped["safety_privacy"]["run_review"] == {"rating": "pass"}
+    assert dumped["reporting_evaluation_integrity"]["findings"][0]["step_id"] == 2
+    assert dumped["execution_efficiency"]["findings"][0]["rating"] == "low"
+    assert dumped["task_completion_quality"]["run_review"] == {
         "rating": "warning",
         "reason": "A correctness problem was later recovered.",
     }
-    assert dumped["run_reviews"]["execution_efficiency"]["rating"] == "low"
+    assert dumped["execution_efficiency"]["run_review"]["rating"] == "low"
 
 
 def test_rejects_invalid_specialized_outputs_before_merge():
@@ -128,7 +126,7 @@ def test_rejects_invalid_specialized_outputs_before_merge():
             {
                 "instance_id": "sample",
                 "review_complete": True,
-                "run_review": {"rating": "pass", "reason": "No issue."},
+                "run_review": {"rating": "pass"},
                 "step_reviews": [{"step_id": 1, "rating": "warning"}],
             }
         )
@@ -179,7 +177,7 @@ def test_rejects_invalid_specialized_outputs_before_merge():
                 {
                     "instance_id": "sample",
                     "review_complete": True,
-                    "run_review": {"rating": "pass", "reason": "No issue."},
+                    "run_review": {"rating": "pass"},
                     "step_reviews": [
                         {"step_id": 1, "rating": "pass"},
                         {"step_id": 2, "rating": "pass"},
@@ -190,7 +188,7 @@ def test_rejects_invalid_specialized_outputs_before_merge():
                 {
                     "instance_id": "sample",
                     "review_complete": True,
-                    "run_review": {"rating": "pass", "reason": "No issue."},
+                    "run_review": {"rating": "pass"},
                     "step_reviews": [
                         {"step_id": 1, "rating": "pass"},
                         {"step_id": 2, "rating": "pass"},
@@ -203,7 +201,6 @@ def test_rejects_invalid_specialized_outputs_before_merge():
                     "review_complete": True,
                     "run_review": {
                         "rating": "high",
-                        "reason": "No efficiency issue.",
                     },
                     "step_reviews": [
                         {"step_id": 1, "rating": "high"},
@@ -257,7 +254,7 @@ def test_rejects_incomplete_duplicate_or_out_of_order_step_reviews(step_ids, mes
     assert evaluation_marker not in instructions["execution_efficiency"]
     assert "exactly one item in `step_reviews`" in instructions["task_completion_quality"]
     assert "`run_review`" in instructions["task_completion_quality"]
-    assert PROMPT_VERSION == "annotation_v8_deduplicated_model_input"
+    assert PROMPT_VERSION == "annotation_v9_sparse_dimension_reviews"
 
     for instruction in instructions.values():
         assert "Evidence priority:" in instruction
@@ -406,10 +403,14 @@ def test_mock_pipeline_performs_four_independent_specialized_generations(tmp_pat
     assert set(result["annotator_generations"]) == {
         agent.name for agent in ANNOTATION_AGENTS
     }
-    assert generation["step_reviews"][0]["task_completion_quality"] == {
-        "rating": "pass"
+    assert generation["task_completion_quality"] == {
+        "findings": [],
+        "run_review": {"rating": "pass"},
     }
-    assert generation["step_reviews"][0]["execution_efficiency"] == {"rating": "high"}
+    assert generation["execution_efficiency"] == {
+        "findings": [],
+        "run_review": {"rating": "high"},
+    }
 
 
 def test_invalid_annotator_generation_is_written_to_failed_dir(tmp_path):
@@ -422,7 +423,6 @@ def test_invalid_annotator_generation_is_written_to_failed_dir(tmp_path):
                     "rating": "high"
                     if agent.name == "execution_efficiency"
                     else "pass",
-                    "reason": "No issue found.",
                 },
                 "step_reviews": [
                     {
@@ -438,7 +438,7 @@ def test_invalid_annotator_generation_is_written_to_failed_dir(tmp_path):
         {
             "instance_id": "sample",
             "review_complete": False,
-            "run_review": {"rating": "pass", "reason": "No issue found."},
+            "run_review": {"rating": "pass"},
             "step_reviews": [{"step_id": 1, "rating": "pass"}],
         }
     )
