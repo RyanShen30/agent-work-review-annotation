@@ -11,3 +11,4 @@ __pycache__/
 *.log
 agentic_review_annotation_distilabel/.distilabel_cache/
 agentic_review_annotation_distilabel/config/config.yaml
+agentic_review_annotation_distilabel/thirdparty

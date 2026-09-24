@@ -40,6 +40,7 @@ class OpenHandsAgent(Agent):
 
         workspace: Any = str(self.config.workspace.resolve())
         keep_image = self.config.environment_kwargs.pop("keep_image", False)
+        self.config.environment_kwargs.pop("save_final_snapshot", None)
         if self.config.runtime == "docker":
             from openhands.workspace import DockerDevWorkspace
 
@@ -77,8 +78,12 @@ class OpenHandsAgent(Agent):
                 "problem": problem,
                 "patch": self._patch(conversation.state.workspace),
                 "status": str(conversation.state.execution_status),
-                "events": [event.model_dump(mode="json") for event in conversation.state.events],
-                "metrics": conversation.conversation_stats.get_combined_metrics().model_dump(mode="json"),
+                "events": [
+                    event.model_dump(mode="json") for event in conversation.state.events
+                ],
+                "metrics": conversation.conversation_stats.get_combined_metrics().model_dump(
+                    mode="json"
+                ),
             }
             result["output_path"] = str(self.save(problem, result))
             return result
@@ -88,11 +93,14 @@ class OpenHandsAgent(Agent):
             if cleanup:
                 cleanup()
             if self.config.runtime == "docker" and not keep_image:
-                logging.getLogger(__name__).info("Removing image %s", self.config.docker_image)
+                logging.getLogger(__name__).info(
+                    "Removing image %s", self.config.docker_image
+                )
                 result = subprocess.run(
                     ["docker", "image", "rm", "-f", self.config.docker_image],
                     capture_output=True,
                     text=True,
+                    check=False,
                 )
                 if result.returncode:
                     logging.getLogger(__name__).warning(
@@ -113,6 +121,8 @@ class OpenHandsAgent(Agent):
             logging.getLogger(__name__).exception("Could not collect final patch")
             return None
         if result.exit_code:
-            logging.getLogger(__name__).warning("Could not collect final patch: %s", result.stderr)
+            logging.getLogger(__name__).warning(
+                "Could not collect final patch: %s", result.stderr
+            )
             return None
         return result.stdout

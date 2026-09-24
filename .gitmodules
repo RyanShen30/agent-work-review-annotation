@@ -4,3 +4,6 @@
 [submodule "agentic_review_annotation_distilabel/thirdparty/mini-swe-agent"]
 	path = agentic_review_annotation_distilabel/thirdparty/mini-swe-agent
 	url = https://github.com/SWE-agent/mini-swe-agent.git
+[submodule "agentic_review_annotation_distilabel/thirdparty/opencollab"]
+	path = agentic_review_annotation_distilabel/thirdparty/opencollab
+	url = https://github.com/RISE-X-Lab/OpenCollab.git

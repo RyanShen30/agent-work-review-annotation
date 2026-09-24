@@ -1,0 +1,62 @@
+# traj-only: generate trajectory; review-only: annotate existing trajectories; full: both.
+mode: full
+cleanup_policy: on_success  # always, on_success, or never; full mode only
+n_workers: 1  # maximum concurrency inside each phase; phases still run in order
+
+generation:
+  harness: mini_swe_agent  # mini_swe_agent, openhands, or opencollab
+  model: openai/gpt-5.4
+  runtime: docker
+  benchmark_path: data/swe-bench-verified/test.parquet
+  instance: 10  # row index, instance_id, or -1 for the entire benchmark
+  workspace: .
+  step_limit: 50
+  cost_limit: 3.0
+  command_timeout: 120
+  model_kwargs:
+    drop_params: true
+  environment_kwargs:
+    keep_image: true
+    save_final_snapshot: true  # mini-swe-agent Docker runs only
+    cwd: /testbed
+    pull_timeout: 900
+  # OpenCollab-only options. Team mode records collaboration in trajectory.jsonl.
+  harness_kwargs: {}
+  # harness_kwargs:
+  #   mode: team  # team or agent
+  #   provider: openai
+  #   budget: 1000000
+  #   team_config: config/opencollab_team.yaml
+  #   use_worktrees: true
+  #   prebuild_team: false
+  #   serialize_turns: false
+
+evaluation:
+  enabled: true
+  runner: official_swebench
+  timeout: 1800
+  open_file_limit: 4096
+
+review:
+  dataset: mini_swe_agent  # must match generation.harness
+  input: output/traj
+  runner: llm
+  runtime: local  # local: existing prompt-only review; docker: repository tools
+  # docker_image: custom/review-image:tag  # optional override for trajectories without image metadata
+  # docker_cwd: /testbed  # optional override for trajectories without cwd metadata
+  # docker_platform: linux/amd64  # optional override; SWE-bench x86_64 images are detected automatically
+  command_timeout: 120
+  max_tool_calls: 12
+  use_cache: true
+  model:
+    model: gpt-5.4
+    temperature: 0.0
+    max_new_tokens: 4096
+    timeout_seconds: 120
+    max_retries: 2
+  prompt_budget:
+    compact_for_model: false
+    max_task_chars: 12000
+    max_patch_chars: 20000
+    max_step_chars: 6000
+    max_total_step_chars: 60000
